@@ -1,4 +1,5 @@
 .venv/
+.venv-no-torch/
 __pycache__/
 *.pyc
 .DS_Store
@@ -6,3 +7,5 @@ native/system_audio
 *.wav
 *.sqlite
 *.db
+.coverage
+tmp-no-torch-test/
