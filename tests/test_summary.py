@@ -14,11 +14,11 @@ class TestSummarizeTranscript:
         assert "Test Meeting" in result
 
     @patch("meeting.summary.urllib.request.urlopen")
-    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"})
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
     def test_api_call_returns_formatted_notes(self, mock_urlopen):
         mock_response = MagicMock()
         mock_response.read.return_value = json.dumps({
-            "choices": [{"message": {"content": "## Summary\nGood meeting."}}]
+            "output_text": "## Meeting Summary\nGood meeting."
         }).encode()
         mock_response.__enter__ = lambda s: mock_response
         mock_response.__exit__ = MagicMock(return_value=False)
@@ -30,9 +30,30 @@ class TestSummarizeTranscript:
         mock_urlopen.assert_called_once()
 
     @patch("meeting.summary.urllib.request.urlopen")
-    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"})
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
     def test_api_error_falls_back_to_raw(self, mock_urlopen):
         mock_urlopen.side_effect = Exception("Network error")
         result = summarize_transcript("You: hello", "Failed Meeting")
         assert "Raw Transcript" in result
         assert "You: hello" in result
+
+    @patch("meeting.summary.urllib.request.urlopen")
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
+    def test_message_content_fallback_extracts_summary(self, mock_urlopen):
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({
+            "output": [
+                {
+                    "type": "message",
+                    "content": [
+                        {"type": "output_text", "text": "## Meeting Summary\nRecovered summary."}
+                    ],
+                }
+            ]
+        }).encode()
+        mock_response.__enter__ = lambda s: mock_response
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        result = summarize_transcript("You: hello", "Fallback Meeting")
+        assert "Recovered summary" in result

@@ -77,7 +77,7 @@ class MeetingSession:
         raw_transcript = merge_transcripts(mic_segments, system_segments, self.start_time)
         print(f"[meeting] Transcript: {len(raw_transcript)} chars")
 
-        # Generate summary via OpenRouter
+        # Generate summary via OpenAI
         formatted_notes = summarize_transcript(raw_transcript, self.title)
 
         # Save to SQLite
