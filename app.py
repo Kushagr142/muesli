@@ -7,6 +7,7 @@ from dictation.paste import paste_text
 from meeting.session import MeetingSession
 from cal_monitor.monitor import CalendarMonitor
 from storage.local_db import init_db, get_recent_meetings
+from ui.floating_indicator import FloatingIndicator
 
 
 class MuesliApp(rumps.App):
@@ -23,6 +24,7 @@ class MuesliApp(rumps.App):
             on_stop=self._on_dictation_stop,
         )
         self._transcribing = False
+        self._indicator = FloatingIndicator()
 
         # Meeting
         self._meeting: MeetingSession | None = None
@@ -49,18 +51,19 @@ class MuesliApp(rumps.App):
 
     # ---------- Status ----------
 
-    def _set_status(self, text: str, icon: str = "\U0001f3a4"):
+    def _set_status(self, text: str, icon: str = "\U0001f3a4", overlay_state: str = "idle"):
         self.title = icon
         for item in self.menu.values():
             if hasattr(item, "title") and item.title.startswith("Status:"):
                 item.title = f"Status: {text}"
+        self._indicator.set_state(overlay_state)
 
     # ---------- Dictation ----------
 
     def _on_dictation_start(self):
         if self._meeting and self._meeting.is_recording:
             return  # don't dictate during meeting recording
-        self._set_status("Recording...", "\U0001f534")  # red circle
+        self._set_status("Recording...", "\U0001f534", "listening")  # red circle
         self.mic.start()
         print("[muesli] Dictation started")
 
@@ -75,7 +78,7 @@ class MuesliApp(rumps.App):
             self._set_status("Idle")
             return
 
-        self._set_status("Transcribing...", "\U0001f7e1")  # yellow circle
+        self._set_status("Transcribing...", "\U0001f7e1", "transcribing")  # yellow circle
         self._transcribing = True
 
         def do_transcribe():
@@ -103,7 +106,7 @@ class MuesliApp(rumps.App):
     def _start_meeting(self, title: str = "Meeting"):
         self._meeting = MeetingSession(title=title)
         self._meeting.start()
-        self._set_status(f"Meeting: {title}", "\U0001f7e2")  # green circle
+        self._set_status(f"Meeting: {title}", "\U0001f7e2", "meeting")  # green circle
         # Update menu item text
         for item in self.menu.values():
             if hasattr(item, "title") and "Meeting Recording" in item.title:
@@ -112,7 +115,7 @@ class MuesliApp(rumps.App):
     def _stop_meeting(self):
         if not self._meeting:
             return
-        self._set_status("Processing meeting...", "\U0001f7e1")
+        self._set_status("Processing meeting...", "\U0001f7e1", "processing")
 
         def process():
             try:
@@ -159,6 +162,7 @@ class MuesliApp(rumps.App):
             self._meeting.stop()
         self.hotkey.stop()
         self._calendar.stop()
+        self._indicator.close()
         rumps.quit_application()
 
     def run(self, **kwargs):
