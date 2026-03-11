@@ -1,0 +1,54 @@
+name: Build macOS App
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-app:
+    runs-on: macos-14
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install app packaging dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-no-torch.txt -r requirements-no-torch-dev.txt "setuptools<81" py2app jaraco.text
+
+      - name: Build py2app bundle
+        run: python setup.py py2app
+
+      - name: Postprocess app bundle
+        run: bash scripts/postprocess_py2app_bundle.sh dist/Muesli.app
+
+      - name: Archive app bundle
+        run: ditto -c -k --sequesterRsrc --keepParent dist/Muesli.app dist/Muesli-macos.zip
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Muesli-macos-app
+          path: dist/Muesli-macos.zip
+          compression-level: 0
+
+      - name: Publish release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "Automated macOS app build"
+          fi
+          gh release upload "$GITHUB_REF_NAME" dist/Muesli-macos.zip --clobber

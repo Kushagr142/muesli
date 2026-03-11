@@ -1,5 +1,6 @@
 import threading
 from pynput import keyboard
+from Quartz import CGPreflightListenEventAccess, CGRequestListenEventAccess
 
 
 class HoldToRecord:
@@ -77,17 +78,38 @@ class HoldToRecord:
             self._prepared = False
 
     def start(self):
+        if self._listener is not None and self._listener.is_alive():
+            return
+        if not CGPreflightListenEventAccess():
+            try:
+                CGRequestListenEventAccess()
+            except Exception:
+                pass
         self._listener = keyboard.Listener(
             on_press=self._on_press,
             on_release=self._on_release,
         )
         self._listener.daemon = True
         self._listener.start()
+        if not self._listener.is_alive():
+            raise RuntimeError("Hotkey listener failed to start")
+
+    def diagnostics(self) -> dict:
+        return {
+            "listen_event_access": bool(CGPreflightListenEventAccess()),
+            "listener_alive": bool(self._listener is not None and self._listener.is_alive()),
+            "active": self._active,
+            "prepared": self._prepared,
+        }
 
     def stop(self):
         if self._listener:
             self._listener.stop()
             self._listener = None
+
+    def restart(self):
+        self.stop()
+        self.start()
 
     @property
     def is_active(self) -> bool:
@@ -96,3 +118,7 @@ class HoldToRecord:
     @property
     def is_prepared(self) -> bool:
         return self._prepared
+
+    @property
+    def is_running(self) -> bool:
+        return bool(self._listener is not None and self._listener.is_alive())

@@ -9,3 +9,10 @@ native/system_audio
 *.db
 .coverage
 tmp-no-torch-test/
+dist-native/
+native/MuesliNative/.build-direct/
+native/MuesliNative/.build/
+build/
+dist/
+output/
+tmp/

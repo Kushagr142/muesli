@@ -1,0 +1,39 @@
+import Foundation
+
+final class ConfigStore {
+    private let configURL: URL
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    init() {
+        let supportURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Muesli", isDirectory: true)
+        self.configURL = supportURL.appendingPathComponent("config.json")
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    }
+
+    func load() -> AppConfig {
+        ensureDirectory()
+        guard let data = try? Data(contentsOf: configURL) else {
+            return AppConfig()
+        }
+        return (try? decoder.decode(AppConfig.self, from: data)) ?? AppConfig()
+    }
+
+    func save(_ config: AppConfig) {
+        ensureDirectory()
+        guard let data = try? encoder.encode(config) else { return }
+        try? data.write(to: configURL, options: .atomic)
+    }
+
+    func configPath() -> URL {
+        configURL
+    }
+
+    private func ensureDirectory() {
+        try? FileManager.default.createDirectory(
+            at: configURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+    }
+}

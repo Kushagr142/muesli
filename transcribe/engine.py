@@ -1,15 +1,23 @@
 import sys
 import threading
 import time
+import os
 import numpy as np
+import config
+from transcribe.backends import (
+    DEFAULT_QWEN_MODEL,
+    DEFAULT_WHISPER_MODEL,
+    create_backend,
+)
 
 _model_lock = threading.Lock()
-_transcribe_fn = None
+_backend = None
+_backend_name = None
+_backend_model_repo = None
 _last_used: float = 0.0
 _unload_timer: threading.Timer | None = None
 _ready = threading.Event()
 
-MODEL_REPO = "mlx-community/whisper-small.en-mlx"
 IDLE_TIMEOUT = 120  # seconds before unloading model
 
 
@@ -18,20 +26,38 @@ def _log(msg):
     sys.stdout.flush()
 
 
+def _resolve_backend_settings() -> tuple[str, str]:
+    cfg = config.load()
+    backend_name = os.environ.get("MUESLI_STT_BACKEND") or cfg.get("stt_backend") or "whisper"
+    model_override = os.environ.get("MUESLI_STT_MODEL")
+
+    if backend_name == "whisper":
+        model_repo = model_override or cfg.get("stt_model") or cfg.get("whisper_model") or DEFAULT_WHISPER_MODEL
+    elif backend_name == "qwen":
+        model_repo = model_override or cfg.get("stt_model") or DEFAULT_QWEN_MODEL
+    else:
+        raise ValueError(f"Unsupported STT backend: {backend_name}")
+
+    return backend_name, model_repo
+
+
 def _ensure_loaded():
-    global _transcribe_fn, _last_used
+    global _backend, _backend_name, _backend_model_repo, _last_used
     with _model_lock:
-        if _transcribe_fn is None:
-            _log(f"[transcribe] Loading model {MODEL_REPO}...")
+        backend_name, model_repo = _resolve_backend_settings()
+        if (
+            _backend is None
+            or _backend_name != backend_name
+            or _backend_model_repo != model_repo
+        ):
+            _log(f"[transcribe] Loading {backend_name} model {model_repo}...")
             t0 = time.time()
-            import mlx_whisper
-            from mlx_whisper import transcribe as _mlx_transcribe
-            # Load model weights by importing the model explicitly
-            from mlx_whisper.load_models import load_model
-            load_model(MODEL_REPO)
-            _transcribe_fn = _mlx_transcribe
+            _backend = create_backend(backend_name, model_repo)
+            _backend.load()
+            _backend_name = backend_name
+            _backend_model_repo = model_repo
             _ready.set()
-            _log(f"[transcribe] Model ready in {time.time() - t0:.1f}s")
+            _log(f"[transcribe] Backend ready in {time.time() - t0:.1f}s")
         _last_used = time.time()
         _schedule_unload()
 
@@ -46,11 +72,13 @@ def _schedule_unload():
 
 
 def _try_unload():
-    global _transcribe_fn, _unload_timer
+    global _backend, _backend_name, _backend_model_repo, _unload_timer
     with _model_lock:
         if time.time() - _last_used >= IDLE_TIMEOUT:
-            _log("[transcribe] Unloading model (idle timeout)")
-            _transcribe_fn = None
+            _log("[transcribe] Unloading backend (idle timeout)")
+            _backend = None
+            _backend_name = None
+            _backend_model_repo = None
             _ready.clear()
             _unload_timer = None
 
@@ -66,6 +94,17 @@ def transcribe(audio: np.ndarray) -> str:
         return ""
     _ensure_loaded()
     t0 = time.time()
-    result = _transcribe_fn(audio, path_or_hf_repo=MODEL_REPO)
+    result = _backend.transcribe(audio)
     _log(f"[transcribe] Transcribed in {time.time() - t0:.1f}s")
-    return result.get("text", "").strip()
+    return result.strip()
+
+
+def transcribe_segments(audio: np.ndarray) -> list[dict]:
+    """Transcribe audio and return timestamped segments."""
+    if audio.size == 0:
+        return []
+    _ensure_loaded()
+    t0 = time.time()
+    segments = _backend.transcribe_segments(audio)
+    _log(f"[transcribe] Segmented transcription in {time.time() - t0:.1f}s")
+    return segments

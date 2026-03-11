@@ -6,9 +6,15 @@ CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 
 DEFAULTS = {
     "hotkey": "cmd+shift+.",
+    "stt_backend": "whisper",
+    "stt_model": "",
     "whisper_model": "mlx-community/whisper-small.en-mlx",
     "idle_timeout": 120,
     "auto_record_meetings": False,
+    "launch_at_login": False,
+    "open_dashboard_on_launch": True,
+    "show_floating_indicator": True,
+    "dashboard_window_frame": None,
 }
 
 

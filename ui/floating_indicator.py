@@ -264,6 +264,9 @@ class FloatingIndicator:
     def set_state(self, state: str):
         AppHelper.callAfter(self._apply_state, state)
 
+    def ensure_visible(self):
+        AppHelper.callAfter(self._apply_state, self.state)
+
     def move_to_origin(self, x: float, y: float):
         if self.panel is None:
             return

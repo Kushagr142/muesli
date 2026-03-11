@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import sys
+import wave
+from pathlib import Path
+
+import numpy as np
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from transcribe.backends import (
+    DEFAULT_QWEN_MODEL,
+    DEFAULT_WHISPER_MODEL,
+    create_backend,
+)
+
+
+class WorkerError(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class SpeechWorker:
+    def __init__(self):
+        self._backend = None
+        self._backend_name = None
+        self._backend_model = None
+
+    def _resolve_backend(self, backend: str | None, model: str | None) -> tuple[str, str]:
+        backend_name = backend or "whisper"
+        if backend_name == "whisper":
+            return backend_name, model or DEFAULT_WHISPER_MODEL
+        if backend_name == "qwen":
+            return backend_name, model or DEFAULT_QWEN_MODEL
+        raise WorkerError("UNSUPPORTED_BACKEND", f"Unsupported backend: {backend_name}")
+
+    def _ensure_loaded(self, backend: str | None, model: str | None):
+        backend_name, model_repo = self._resolve_backend(backend, model)
+        if (
+            self._backend is None
+            or self._backend_name != backend_name
+            or self._backend_model != model_repo
+        ):
+            print(f"[worker] loading {backend_name} {model_repo}", file=sys.stderr, flush=True)
+            self._backend = create_backend(backend_name, model_repo)
+            self._backend.load()
+            self._backend_name = backend_name
+            self._backend_model = model_repo
+            print("[worker] backend ready", file=sys.stderr, flush=True)
+
+    def _load_audio(self, wav_path: str) -> np.ndarray:
+        path = Path(wav_path).expanduser()
+        if not path.exists():
+            raise WorkerError("FILE_NOT_FOUND", f"WAV path does not exist: {path}")
+
+        with wave.open(str(path), "rb") as wav_file:
+            channels = wav_file.getnchannels()
+            sample_rate = wav_file.getframerate()
+            sample_width = wav_file.getsampwidth()
+            frames = wav_file.readframes(wav_file.getnframes())
+
+        if sample_rate != 16000:
+            raise WorkerError("UNSUPPORTED_SAMPLE_RATE", f"Expected 16kHz WAV, got {sample_rate}Hz")
+        if sample_width != 2:
+            raise WorkerError("UNSUPPORTED_SAMPLE_WIDTH", f"Expected 16-bit WAV, got {sample_width * 8}-bit")
+
+        audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32767.0
+        if channels > 1:
+            audio = audio.reshape(-1, channels).mean(axis=1)
+        return audio
+
+    def ping(self, _params: dict) -> dict:
+        return {"status": "ok"}
+
+    def preload_backend(self, params: dict) -> dict:
+        self._ensure_loaded(params.get("backend"), params.get("model"))
+        return {
+            "backend": self._backend_name,
+            "model": self._backend_model,
+        }
+
+    def transcribe_file(self, params: dict) -> dict:
+        wav_path = params.get("wav_path")
+        if not wav_path:
+            raise WorkerError("INVALID_PARAMS", "wav_path is required")
+        self._ensure_loaded(params.get("backend"), params.get("model"))
+        audio = self._load_audio(wav_path)
+        text = self._backend.transcribe(audio).strip()
+        return {
+            "text": text,
+            "backend": self._backend_name,
+            "model": self._backend_model,
+        }
+
+    def shutdown(self, _params: dict) -> dict:
+        self._backend = None
+        self._backend_name = None
+        self._backend_model = None
+        return {"status": "shutting_down"}
+
+
+def _write_response(payload: dict):
+    sys.stdout.write(json.dumps(payload) + "\n")
+    sys.stdout.flush()
+
+
+def _handle_message(worker: SpeechWorker, message: dict) -> tuple[dict, bool]:
+    request_id = message.get("id")
+    method = message.get("method")
+    params = message.get("params") or {}
+
+    if not request_id:
+        raise WorkerError("INVALID_REQUEST", "id is required")
+    if not method:
+        raise WorkerError("INVALID_REQUEST", "method is required")
+
+    if not hasattr(worker, method):
+        raise WorkerError("UNKNOWN_METHOD", f"Unknown method: {method}")
+
+    handler = getattr(worker, method)
+    result = handler(params)
+    should_exit = method == "shutdown"
+    return {
+        "id": request_id,
+        "ok": True,
+        "result": result,
+    }, should_exit
+
+
+def main():
+    os.environ.setdefault("PYTHONUNBUFFERED", "1")
+    worker = SpeechWorker()
+
+    for raw_line in sys.stdin:
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        try:
+            message = json.loads(line)
+            response, should_exit = _handle_message(worker, message)
+            _write_response(response)
+            if should_exit:
+                return
+        except WorkerError as exc:
+            _write_response(
+                {
+                    "id": message.get("id") if isinstance(locals().get("message"), dict) else None,
+                    "ok": False,
+                    "error": {
+                        "code": exc.code,
+                        "message": exc.message,
+                    },
+                }
+            )
+        except Exception as exc:  # pragma: no cover - defensive wrapper
+            _write_response(
+                {
+                    "id": message.get("id") if isinstance(locals().get("message"), dict) else None,
+                    "ok": False,
+                    "error": {
+                        "code": "INTERNAL_ERROR",
+                        "message": str(exc),
+                    },
+                }
+            )
+
+
+if __name__ == "__main__":
+    main()

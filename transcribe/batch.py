@@ -1,7 +1,7 @@
 import time
 import numpy as np
 import wave
-from transcribe.engine import transcribe as transcribe_audio, _log
+from transcribe.engine import transcribe_segments as backend_transcribe_segments, _log
 
 
 def transcribe_wav(wav_path: str) -> list[dict]:
@@ -41,23 +41,7 @@ def transcribe_wav(wav_path: str) -> list[dict]:
     duration = len(audio) / 16000
     _log(f"[batch] Audio: {duration:.1f}s, transcribing...")
 
-    # Transcribe in chunks for timestamps
-    chunk_duration = 30  # seconds per chunk
-    chunk_size = 16000 * chunk_duration
-    segments = []
-
-    for i in range(0, len(audio), chunk_size):
-        chunk = audio[i : i + chunk_size]
-        if len(chunk) < 1600:  # skip very short chunks (< 0.1s)
-            continue
-        start_time = i / 16000
-        text = transcribe_audio(chunk)
-        if text:
-            segments.append({
-                "start": start_time,
-                "end": start_time + len(chunk) / 16000,
-                "text": text,
-            })
+    segments = backend_transcribe_segments(audio)
 
     elapsed = time.time() - t0
     _log(f"[batch] Done: {len(segments)} segments in {elapsed:.1f}s ({duration/elapsed:.1f}x realtime)")
