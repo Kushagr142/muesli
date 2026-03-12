@@ -20,10 +20,28 @@ struct BackendOption: Equatable {
     static let all: [BackendOption] = [.whisper, .qwen]
 }
 
+struct MeetingSummaryBackendOption: Equatable {
+    let backend: String
+    let label: String
+
+    static let openAI = MeetingSummaryBackendOption(
+        backend: "openai",
+        label: "OpenAI"
+    )
+
+    static let openRouter = MeetingSummaryBackendOption(
+        backend: "openrouter",
+        label: "OpenRouter"
+    )
+
+    static let all: [MeetingSummaryBackendOption] = [.openAI, .openRouter]
+}
+
 struct AppConfig: Codable {
     var hotkey: String = "left_command_hold"
     var sttBackend: String = BackendOption.whisper.backend
     var sttModel: String = BackendOption.whisper.model
+    var meetingSummaryBackend: String = MeetingSummaryBackendOption.openAI.backend
     var whisperModel: String = BackendOption.whisper.model
     var idleTimeout: Double = 120
     var autoRecordMeetings: Bool = false
@@ -37,6 +55,7 @@ struct AppConfig: Codable {
         case hotkey
         case sttBackend = "stt_backend"
         case sttModel = "stt_model"
+        case meetingSummaryBackend = "meeting_summary_backend"
         case whisperModel = "whisper_model"
         case idleTimeout = "idle_timeout"
         case autoRecordMeetings = "auto_record_meetings"

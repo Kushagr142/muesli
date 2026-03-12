@@ -18,6 +18,7 @@ final class MuesliController: NSObject {
 
     private(set) var config: AppConfig
     private(set) var selectedBackend: BackendOption
+    private(set) var selectedMeetingSummaryBackend: MeetingSummaryBackendOption
     private var dictationStartedAt: Date?
     private var openWindowCount = 0
     private var lastExternalApp: NSRunningApplication?
@@ -30,6 +31,9 @@ final class MuesliController: NSObject {
         self.selectedBackend = BackendOption.all.first(where: {
             $0.backend == loadedConfig.sttBackend && $0.model == loadedConfig.sttModel
         }) ?? .whisper
+        self.selectedMeetingSummaryBackend = MeetingSummaryBackendOption.all.first(where: {
+            $0.backend == loadedConfig.meetingSummaryBackend
+        }) ?? .openAI
         self.workerClient = PythonWorkerClient(runtime: runtime)
         self.indicator = FloatingIndicatorController(configStore: configStore)
         super.init()
@@ -135,6 +139,9 @@ final class MuesliController: NSObject {
         selectedBackend = BackendOption.all.first(where: {
             $0.backend == config.sttBackend && $0.model == config.sttModel
         }) ?? .whisper
+        selectedMeetingSummaryBackend = MeetingSummaryBackendOption.all.first(where: {
+            $0.backend == config.meetingSummaryBackend
+        }) ?? .openAI
         statusBarController?.refresh()
         historyWindowController?.updateBackendLabel()
         if config.showFloatingIndicator {
@@ -151,6 +158,12 @@ final class MuesliController: NSObject {
         }
         workerClient.preloadBackend(option: option) { [weak self] _ in
             self?.statusBarController?.refresh()
+        }
+    }
+
+    func selectMeetingSummaryBackend(_ option: MeetingSummaryBackendOption) {
+        updateConfig {
+            $0.meetingSummaryBackend = option.backend
         }
     }
 
@@ -186,6 +199,12 @@ final class MuesliController: NSObject {
         guard let label = sender.representedObject as? String,
               let option = BackendOption.all.first(where: { $0.label == label }) else { return }
         selectBackend(option)
+    }
+
+    @objc func selectMeetingSummaryBackendFromMenu(_ sender: NSMenuItem) {
+        guard let label = sender.representedObject as? String,
+              let option = MeetingSummaryBackendOption.all.first(where: { $0.label == label }) else { return }
+        selectMeetingSummaryBackend(option)
     }
 
     func clearDictationHistory() {
@@ -300,7 +319,7 @@ final class MuesliController: NSObject {
                 )
                 self.statusBarController?.refresh()
                 self.historyWindowController?.reload()
-                PasteController.paste(text: text, runtime: self.runtime)
+                PasteController.paste(text: text)
             case .failure(let error):
                 fputs("[muesli-native] transcription failed: \(error)\n", stderr)
             }

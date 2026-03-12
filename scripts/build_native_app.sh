@@ -101,5 +101,7 @@ ditto "$STAGED_APP_DIR" "$APP_DIR"
 
 codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR" >/dev/null 2>&1 || true
 
-echo "Built $STAGED_APP_DIR"
+rm -rf "$STAGED_APP_DIR"
+
+echo "Staged app cleaned from $STAGED_APP_DIR"
 echo "Installed $APP_DIR"

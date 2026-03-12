@@ -104,6 +104,22 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.setSubmenu(backendMenu, for: backendItem)
         menu.addItem(backendItem)
 
+        let meetingBackendItem = NSMenuItem(title: "Meetings Backend", action: nil, keyEquivalent: "")
+        let meetingBackendMenu = NSMenu()
+        for option in MeetingSummaryBackendOption.all {
+            let prefix = controller.selectedMeetingSummaryBackend == option ? "✓ " : ""
+            let item = NSMenuItem(
+                title: "\(prefix)\(option.label)",
+                action: #selector(MuesliController.selectMeetingSummaryBackendFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            item.target = controller
+            item.representedObject = option.label
+            meetingBackendMenu.addItem(item)
+        }
+        menu.setSubmenu(meetingBackendMenu, for: meetingBackendItem)
+        menu.addItem(meetingBackendItem)
+
         menu.addItem(.separator())
         menu.addItem(actionItem(title: "Settings…", action: #selector(MuesliController.openPreferences)))
         statusLabel.isEnabled = false

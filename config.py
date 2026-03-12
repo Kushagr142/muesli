@@ -8,6 +8,7 @@ DEFAULTS = {
     "hotkey": "cmd+shift+.",
     "stt_backend": "whisper",
     "stt_model": "",
+    "meeting_summary_backend": "openai",
     "whisper_model": "mlx-community/whisper-small.en-mlx",
     "idle_timeout": 120,
     "auto_record_meetings": False,

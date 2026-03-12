@@ -1,26 +1,30 @@
 import AppKit
+import ApplicationServices
 import Foundation
 
 enum PasteController {
-    static func paste(text: String, runtime: RuntimePaths) {
+    static func paste(text: String) {
         guard !text.isEmpty else { return }
-        let process = Process()
-        process.executableURL = runtime.pythonExecutable
-        process.arguments = [runtime.pasteScript.path]
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
 
-        let stdinPipe = Pipe()
-        process.standardInput = stdinPipe
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-            if let data = text.data(using: .utf8) {
-                stdinPipe.fileHandleForWriting.write(data)
-            }
-            stdinPipe.fileHandleForWriting.closeFile()
-        } catch {
-            fputs("[muesli-native] paste helper failed: \(error)\n", stderr)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            simulatePaste()
         }
+    }
+
+    private static func simulatePaste() {
+        guard let source = CGEventSource(stateID: .combinedSessionState) else {
+            fputs("[muesli-native] failed to create event source for paste\n", stderr)
+            return
+        }
+        let keyCode: CGKeyCode = 9 // V
+        let commandDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
+        commandDown?.flags = .maskCommand
+        let commandUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
+        commandUp?.flags = .maskCommand
+        commandDown?.post(tap: .cghidEventTap)
+        commandUp?.post(tap: .cghidEventTap)
     }
 }

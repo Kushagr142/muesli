@@ -4,9 +4,12 @@ import urllib.request
 
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 OPENAI_URL = "https://api.openai.com/v1/responses"
+OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Official lightweight GPT-5 model alias from OpenAI docs.
 DEFAULT_MODEL = "gpt-5-mini"
+DEFAULT_OPENROUTER_MODEL = "openai/gpt-5-mini"
 
 SUMMARY_INSTRUCTIONS = """You are a meeting notes assistant. Given a raw meeting transcript, produce structured meeting notes with the following sections:
 
@@ -43,6 +46,30 @@ def _load_api_key() -> str:
     return cfg.get("openai_api_key", "")
 
 
+def _load_openrouter_api_key() -> str:
+    api_key = os.environ.get(OPENROUTER_API_KEY_ENV, "")
+    if api_key:
+        return api_key
+
+    config_path = os.path.expanduser("~/Library/Application Support/Muesli/config.json")
+    if not os.path.exists(config_path):
+        return ""
+
+    with open(config_path) as f:
+        cfg = json.load(f)
+    return cfg.get("openrouter_api_key", "")
+
+
+def _load_meeting_summary_backend() -> str:
+    config_path = os.path.expanduser("~/Library/Application Support/Muesli/config.json")
+    if not os.path.exists(config_path):
+        return "openai"
+
+    with open(config_path) as f:
+        cfg = json.load(f)
+    return cfg.get("meeting_summary_backend", "openai")
+
+
 def _load_model_override() -> str | None:
     config_path = os.path.expanduser("~/Library/Application Support/Muesli/config.json")
     if not os.path.exists(config_path):
@@ -51,6 +78,16 @@ def _load_model_override() -> str | None:
     with open(config_path) as f:
         cfg = json.load(f)
     return cfg.get("openai_model") or cfg.get("summary_model")
+
+
+def _load_openrouter_model_override() -> str | None:
+    config_path = os.path.expanduser("~/Library/Application Support/Muesli/config.json")
+    if not os.path.exists(config_path):
+        return None
+
+    with open(config_path) as f:
+        cfg = json.load(f)
+    return cfg.get("openrouter_model") or cfg.get("meeting_summary_model")
 
 
 def _extract_output_text(result: dict) -> str:
@@ -68,6 +105,26 @@ def _extract_output_text(result: dict) -> str:
     return ""
 
 
+def _extract_openrouter_text(result: dict) -> str:
+    choices = result.get("choices", [])
+    if not choices:
+        return ""
+
+    message = choices[0].get("message", {})
+    content = message.get("content", "")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                text = item.get("text", "")
+                if text:
+                    parts.append(text)
+        return "\n".join(parts).strip()
+    return ""
+
+
 def summarize_transcript(
     transcript: str,
     meeting_title: str = "",
@@ -78,6 +135,53 @@ def summarize_transcript(
     Returns formatted meeting notes as a string.
     Falls back to raw transcript if API is unavailable.
     """
+    backend = _load_meeting_summary_backend().lower()
+
+    if backend == "openrouter":
+        api_key = _load_openrouter_api_key()
+        if not api_key:
+            print("[summary] No OpenRouter API key found. Returning raw transcript.")
+            print("[summary] Set OPENROUTER_API_KEY env var or add 'openrouter_api_key' to config.json")
+            return f"# {meeting_title or 'Meeting Notes'}\n\n## Raw Transcript\n\n{transcript}"
+
+        model = model or _load_openrouter_model_override() or DEFAULT_OPENROUTER_MODEL
+        payload = json.dumps({
+            "model": model,
+            "messages": [
+                {"role": "system", "content": SUMMARY_INSTRUCTIONS},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Meeting title: {meeting_title or 'Untitled Meeting'}\n\n"
+                        f"Raw transcript:\n{transcript}"
+                    ),
+                },
+            ],
+            "max_tokens": 1200,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            OPENROUTER_URL,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "X-OpenRouter-Title": "Muesli",
+            },
+        )
+
+        try:
+            print(f"[summary] Sending to OpenRouter ({model})...")
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                result = json.loads(resp.read())
+                notes = _extract_openrouter_text(result)
+                if not notes:
+                    raise ValueError("OpenRouter response did not contain summary text")
+                print(f"[summary] Summary generated ({len(notes)} chars)")
+                return f"# {meeting_title or 'Meeting Notes'}\n\n{notes}"
+        except Exception as e:
+            print(f"[summary] OpenRouter error: {e}")
+            return f"# {meeting_title or 'Meeting Notes'}\n\n## Raw Transcript\n\n{transcript}"
+
     api_key = _load_api_key()
 
     if not api_key:
