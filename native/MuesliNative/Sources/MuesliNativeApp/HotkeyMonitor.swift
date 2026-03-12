@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import Foundation
 
@@ -7,8 +8,8 @@ final class HotkeyMonitor {
     var onStop: (() -> Void)?
     var onCancel: (() -> Void)?
 
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
+    private var globalMonitor: Any?
+    private var localMonitor: Any?
     private var prepareWorkItem: DispatchWorkItem?
     private var startWorkItem: DispatchWorkItem?
     private var leftCommandDown = false
@@ -20,44 +21,40 @@ final class HotkeyMonitor {
     private let startDelay: TimeInterval = 0.25
 
     func start() {
-        guard eventTap == nil else { return }
+        guard globalMonitor == nil, localMonitor == nil else { return }
 
-        let mask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)
-        let callback: CGEventTapCallBack = { _, type, event, userInfo in
-            guard let userInfo else {
-                return Unmanaged.passUnretained(event)
-            }
-            let monitor = Unmanaged<HotkeyMonitor>.fromOpaque(userInfo).takeUnretainedValue()
-            return monitor.handle(eventType: type, event: event)
+        let hasListenAccess = CGPreflightListenEventAccess()
+        fputs("[hotkey] listen event access: \(hasListenAccess)\n", stderr)
+        if !hasListenAccess {
+            let requested = CGRequestListenEventAccess()
+            fputs("[hotkey] requested listen event access: \(requested)\n", stderr)
         }
 
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: CGEventMask(mask),
-            callback: callback,
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else {
-            fputs("[hotkey] failed to create event tap\n", stderr)
-            return
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak self] event in
+            self?.handle(event)
+        }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak self] event in
+            self?.handle(event)
+            return event
         }
 
-        eventTap = tap
-        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        if let runLoopSource {
-            CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        if globalMonitor != nil || localMonitor != nil {
+            fputs("[hotkey] event monitors started\n", stderr)
+        } else {
+            fputs("[hotkey] failed to start event monitors\n", stderr)
         }
-        CGEvent.tapEnable(tap: tap, enable: true)
     }
 
     func stop() {
         cancelTimers()
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        if let globalMonitor {
+            NSEvent.removeMonitor(globalMonitor)
         }
-        runLoopSource = nil
-        eventTap = nil
+        if let localMonitor {
+            NSEvent.removeMonitor(localMonitor)
+        }
+        globalMonitor = nil
+        localMonitor = nil
         leftCommandDown = false
         otherKeyPressed = false
         prepared = false
@@ -70,11 +67,11 @@ final class HotkeyMonitor {
     }
 
     var isRunning: Bool {
-        eventTap != nil
+        globalMonitor != nil || localMonitor != nil
     }
 
-    private func handle(eventType: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        switch eventType {
+    private func handle(_ event: NSEvent) {
+        switch event.type {
         case .flagsChanged:
             handleFlagsChanged(event)
         case .keyDown:
@@ -82,23 +79,24 @@ final class HotkeyMonitor {
         default:
             break
         }
-        return Unmanaged.passUnretained(event)
     }
 
-    private func handleFlagsChanged(_ event: CGEvent) {
-        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-        let flags = event.flags
+    private func handleFlagsChanged(_ event: NSEvent) {
+        let keyCode = event.keyCode
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
         if keyCode == 55 {
-            let isDown = flags.contains(.maskCommand)
+            let isDown = flags.contains(.command)
             if isDown {
                 if !leftCommandDown {
+                    fputs("[hotkey] left command down\n", stderr)
                     leftCommandDown = true
                     otherKeyPressed = false
                     prepared = false
                     scheduleTimers()
                 }
             } else {
+                fputs("[hotkey] left command up\n", stderr)
                 leftCommandDown = false
                 cancelTimers()
                 if active {
@@ -109,7 +107,8 @@ final class HotkeyMonitor {
                     onCancel?()
                 }
             }
-        } else if keyCode == 54, !flags.contains(.maskCommand), leftCommandDown {
+        } else if keyCode == 54, !flags.contains(.command), leftCommandDown {
+            fputs("[hotkey] canceled by right command\n", stderr)
             otherKeyPressed = true
             cancelTimers()
             if active {
@@ -122,10 +121,11 @@ final class HotkeyMonitor {
         }
     }
 
-    private func handleKeyDown(_ event: CGEvent) {
+    private func handleKeyDown(_ event: NSEvent) {
         if leftCommandDown {
-            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            let keyCode = event.keyCode
             if keyCode != 55 && keyCode != 54 {
+                fputs("[hotkey] canceled by other key\n", stderr)
                 otherKeyPressed = true
                 cancelTimers()
                 if active {
@@ -143,11 +143,13 @@ final class HotkeyMonitor {
         let prepare = DispatchWorkItem { [weak self] in
             guard let self, self.leftCommandDown, !self.otherKeyPressed, !self.prepared else { return }
             self.prepared = true
+            fputs("[hotkey] prepared\n", stderr)
             self.onPrepare?()
         }
         let start = DispatchWorkItem { [weak self] in
             guard let self, self.leftCommandDown, !self.otherKeyPressed, !self.active else { return }
             self.active = true
+            fputs("[hotkey] start\n", stderr)
             self.onStart?()
         }
         prepareWorkItem = prepare

@@ -19,12 +19,16 @@ final class MuesliController: NSObject {
     private(set) var config: AppConfig
     private(set) var selectedBackend: BackendOption
     private var dictationStartedAt: Date?
+    private var openWindowCount = 0
+    private var lastExternalApp: NSRunningApplication?
+    private var workspaceObserver: NSObjectProtocol?
 
     init(runtime: RuntimePaths) {
+        let loadedConfig = configStore.load()
         self.runtime = runtime
-        self.config = configStore.load()
+        self.config = loadedConfig
         self.selectedBackend = BackendOption.all.first(where: {
-            $0.backend == config.sttBackend && $0.model == config.sttModel
+            $0.backend == loadedConfig.sttBackend && $0.model == loadedConfig.sttModel
         }) ?? .whisper
         self.workerClient = PythonWorkerClient(runtime: runtime)
         self.indicator = FloatingIndicatorController(configStore: configStore)
@@ -44,6 +48,17 @@ final class MuesliController: NSObject {
         hotkeyMonitor.onStop = { [weak self] in self?.handleStop() }
         hotkeyMonitor.onCancel = { [weak self] in self?.handleCancel() }
         hotkeyMonitor.start()
+        workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard
+                let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                app != NSRunningApplication.current
+            else { return }
+            self?.lastExternalApp = app
+        }
 
         statusBarController = StatusBarController(controller: self, runtime: runtime)
         preferencesWindowController = PreferencesWindowController(controller: self)
@@ -58,6 +73,10 @@ final class MuesliController: NSObject {
     }
 
     func shutdown() {
+        if let workspaceObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver)
+            self.workspaceObserver = nil
+        }
         hotkeyMonitor.stop()
         recorder.cancel()
         workerClient.stop()
@@ -66,6 +85,25 @@ final class MuesliController: NSObject {
 
     func recentDictations() -> [DictationRecord] {
         (try? dictationStore.recentDictations(limit: 10)) ?? []
+    }
+
+    func recentMeetings() -> [MeetingRecord] {
+        (try? dictationStore.recentMeetings(limit: 10)) ?? []
+    }
+
+    func dictationStats() -> DictationStats {
+        (try? dictationStore.dictationStats()) ?? DictationStats(
+            totalWords: 0,
+            totalSessions: 0,
+            averageWordsPerSession: 0,
+            averageWPM: 0,
+            currentStreakDays: 0,
+            longestStreakDays: 0
+        )
+    }
+
+    func meetingStats() -> MeetingStats {
+        (try? dictationStore.meetingStats()) ?? MeetingStats(totalWords: 0, totalMeetings: 0, averageWPM: 0)
     }
 
     func truncate(_ text: String, limit: Int) -> String {
@@ -117,11 +155,15 @@ final class MuesliController: NSObject {
     }
 
     @objc func openHistoryWindow() {
-        historyWindowController?.show()
+        DispatchQueue.main.async { [weak self] in
+            self?.historyWindowController?.show()
+        }
     }
 
     @objc func openPreferences() {
-        preferencesWindowController?.show()
+        DispatchQueue.main.async { [weak self] in
+            self?.preferencesWindowController?.show()
+        }
     }
 
     @objc func quitApp() {
@@ -130,7 +172,13 @@ final class MuesliController: NSObject {
 
     @objc func copyRecentDictation(_ sender: NSMenuItem) {
         if let text = sender.representedObject as? String {
-            PasteController.paste(text: text)
+            copyToClipboard(text)
+        }
+    }
+
+    @objc func copyRecentMeeting(_ sender: NSMenuItem) {
+        if let text = sender.representedObject as? String {
+            copyToClipboard(text)
         }
     }
 
@@ -146,6 +194,33 @@ final class MuesliController: NSObject {
         historyWindowController?.reload()
     }
 
+    func clearMeetingHistory() {
+        try? dictationStore.clearMeetings()
+        statusBarController?.refresh()
+        historyWindowController?.reload()
+    }
+
+    func copyToClipboard(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
+    func noteWindowOpened() {
+        openWindowCount += 1
+        if NSApplication.shared.activationPolicy() != .regular {
+            NSApplication.shared.setActivationPolicy(.regular)
+        }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    func noteWindowClosed() {
+        openWindowCount = max(0, openWindowCount - 1)
+        if openWindowCount == 0 {
+            NSApplication.shared.setActivationPolicy(.accessory)
+        }
+    }
+
     private func setState(_ state: DictationState) {
         let status: String
         switch state {
@@ -159,7 +234,7 @@ final class MuesliController: NSObject {
     }
 
     private func handlePrepare() {
-        guard config.showFloatingIndicator || true else { return }
+        fputs("[muesli-native] prepare\n", stderr)
         do {
             try recorder.prepare()
             setState(.preparing)
@@ -170,6 +245,7 @@ final class MuesliController: NSObject {
     }
 
     private func handleStart() {
+        fputs("[muesli-native] recording start\n", stderr)
         do {
             try recorder.start()
             dictationStartedAt = Date()
@@ -181,20 +257,24 @@ final class MuesliController: NSObject {
     }
 
     private func handleCancel() {
+        fputs("[muesli-native] cancel\n", stderr)
         recorder.cancel()
         dictationStartedAt = nil
         setState(.idle)
     }
 
     private func handleStop() {
+        fputs("[muesli-native] stop\n", stderr)
         let startedAt = dictationStartedAt ?? Date()
         dictationStartedAt = nil
         guard let wavURL = recorder.stop() else {
+            fputs("[muesli-native] stop without wav\n", stderr)
             setState(.idle)
             return
         }
         let duration = max(Date().timeIntervalSince(startedAt), 0)
         if duration < 0.3 {
+            fputs("[muesli-native] discarded short recording\n", stderr)
             try? FileManager.default.removeItem(at: wavURL)
             setState(.idle)
             return
@@ -220,7 +300,7 @@ final class MuesliController: NSObject {
                 )
                 self.statusBarController?.refresh()
                 self.historyWindowController?.reload()
-                PasteController.paste(text: text)
+                PasteController.paste(text: text, runtime: self.runtime)
             case .failure(let error):
                 fputs("[muesli-native] transcription failed: \(error)\n", stderr)
             }

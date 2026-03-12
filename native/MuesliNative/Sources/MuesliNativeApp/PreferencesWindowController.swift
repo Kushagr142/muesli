@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 @MainActor
-final class PreferencesWindowController: NSObject {
+final class PreferencesWindowController: NSObject, NSWindowDelegate {
     private let controller: MuesliController
     private var window: NSWindow?
     private var launchCheckbox: NSButton?
@@ -19,8 +19,13 @@ final class PreferencesWindowController: NSObject {
             buildWindow()
         }
         refresh()
-        window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        guard let window else { return }
+        if !window.isVisible {
+            controller.noteWindowOpened()
+        }
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
     }
 
     func refresh() {
@@ -39,6 +44,8 @@ final class PreferencesWindowController: NSObject {
             defer: false
         )
         window.title = "Muesli Settings"
+        window.isReleasedWhenClosed = false
+        window.delegate = self
         let content = window.contentView!
 
         let launch = checkbox(title: "Launch at login", action: #selector(toggleLaunchAtLogin))
@@ -72,6 +79,10 @@ final class PreferencesWindowController: NSObject {
         content.addSubview(clearButton)
 
         self.window = window
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        controller.noteWindowClosed()
     }
 
     private func checkbox(title: String, action: Selector) -> NSButton {

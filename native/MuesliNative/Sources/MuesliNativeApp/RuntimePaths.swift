@@ -4,6 +4,7 @@ struct RuntimePaths {
     let repoRoot: URL
     let pythonExecutable: URL
     let workerScript: URL
+    let pasteScript: URL
     let menuIcon: URL?
     let appIcon: URL?
     let bundlePath: URL?
@@ -23,6 +24,7 @@ struct RuntimePaths {
                     repoRoot: repoRoot,
                     pythonExecutable: pythonExecutable,
                     workerScript: workerScript,
+                    pasteScript: bundleResource.appendingPathComponent("paste_text.py"),
                     menuIcon: bundleResource.appendingPathComponent("menu_m_template.png"),
                     appIcon: bundleResource.appendingPathComponent("muesli.icns"),
                     bundlePath: Bundle.main.bundleURL
@@ -38,6 +40,7 @@ struct RuntimePaths {
                     repoRoot: searchURL,
                     pythonExecutable: searchURL.appendingPathComponent(".venv/bin/python"),
                     workerScript: candidate,
+                    pasteScript: searchURL.appendingPathComponent("bridge/paste_text.py"),
                     menuIcon: searchURL.appendingPathComponent("assets/menu_m_template.png"),
                     appIcon: searchURL.appendingPathComponent("assets/muesli.icns"),
                     bundlePath: nil

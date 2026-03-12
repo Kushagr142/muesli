@@ -32,6 +32,20 @@ struct AppConfig: Codable {
     var showFloatingIndicator: Bool = true
     var dashboardWindowFrame: WindowFrame? = nil
     var indicatorOrigin: CGPointCodable? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case hotkey
+        case sttBackend = "stt_backend"
+        case sttModel = "stt_model"
+        case whisperModel = "whisper_model"
+        case idleTimeout = "idle_timeout"
+        case autoRecordMeetings = "auto_record_meetings"
+        case launchAtLogin = "launch_at_login"
+        case openDashboardOnLaunch = "open_dashboard_on_launch"
+        case showFloatingIndicator = "show_floating_indicator"
+        case dashboardWindowFrame = "dashboard_window_frame"
+        case indicatorOrigin = "indicator_origin"
+    }
 }
 
 struct WindowFrame: Codable {
@@ -44,6 +58,37 @@ struct WindowFrame: Codable {
 struct CGPointCodable: Codable {
     let x: Double
     let y: Double
+
+    init(x: Double, y: Double) {
+        self.x = x
+        self.y = y
+    }
+
+    init(from decoder: Decoder) throws {
+        if var arrayContainer = try? decoder.unkeyedContainer() {
+            let x = try arrayContainer.decode(Double.self)
+            let y = try arrayContainer.decode(Double.self)
+            self.init(x: x, y: y)
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            x: try container.decode(Double.self, forKey: .x),
+            y: try container.decode(Double.self, forKey: .y)
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(x, forKey: .x)
+        try container.encode(y, forKey: .y)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case x
+        case y
+    }
 }
 
 struct DictationRecord: Identifiable {
@@ -53,6 +98,31 @@ struct DictationRecord: Identifiable {
     let rawText: String
     let appContext: String
     let wordCount: Int
+}
+
+struct MeetingRecord: Identifiable {
+    let id: Int64
+    let title: String
+    let startTime: String
+    let durationSeconds: Double
+    let rawTranscript: String
+    let formattedNotes: String
+    let wordCount: Int
+}
+
+struct DictationStats {
+    let totalWords: Int
+    let totalSessions: Int
+    let averageWordsPerSession: Double
+    let averageWPM: Double
+    let currentStreakDays: Int
+    let longestStreakDays: Int
+}
+
+struct MeetingStats {
+    let totalWords: Int
+    let totalMeetings: Int
+    let averageWPM: Double
 }
 
 enum DictationState: String {

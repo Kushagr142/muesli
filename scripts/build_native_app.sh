@@ -3,12 +3,15 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT/dist-native"
-APP_DIR="$DIST_DIR/Muesli.app"
+STAGED_APP_DIR="$DIST_DIR/Muesli.app"
+INSTALL_DIR="${MUESLI_INSTALL_DIR:-/Applications}"
+APP_DIR="$INSTALL_DIR/Muesli.app"
 SRC_DIR="$ROOT/native/MuesliNative/Sources/MuesliNativeApp"
 BUILD_CONFIG="${1:-release}"
 BUILD_DIR="$ROOT/native/MuesliNative/.build-direct/$BUILD_CONFIG"
 BIN_PATH="$BUILD_DIR/Muesli"
 PYTHON_BIN="$ROOT/.venv/bin/python"
+SIGN_IDENTITY="${MUESLI_SIGN_IDENTITY:--}"
 
 if [[ ! -x "$PYTHON_BIN" ]]; then
   echo "Expected Python runtime at $PYTHON_BIN" >&2
@@ -19,6 +22,7 @@ mkdir -p "$DIST_DIR" "$BUILD_DIR"
 
 set +e
 swiftc "$SRC_DIR"/*.swift \
+  -parse-as-library \
   -o "$BIN_PATH" \
   -framework AppKit \
   -framework AVFoundation \
@@ -42,22 +46,23 @@ EOF
   exit $status
 fi
 
-rm -rf "$APP_DIR"
-mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
+rm -rf "$STAGED_APP_DIR"
+mkdir -p "$STAGED_APP_DIR/Contents/MacOS" "$STAGED_APP_DIR/Contents/Resources"
 
-cp "$BIN_PATH" "$APP_DIR/Contents/MacOS/Muesli"
-cp "$ROOT/assets/menu_m_template.png" "$APP_DIR/Contents/Resources/menu_m_template.png"
-cp "$ROOT/assets/muesli.icns" "$APP_DIR/Contents/Resources/muesli.icns"
-cp "$ROOT/bridge/worker.py" "$APP_DIR/Contents/Resources/worker.py"
+cp "$BIN_PATH" "$STAGED_APP_DIR/Contents/MacOS/Muesli"
+cp "$ROOT/assets/menu_m_template.png" "$STAGED_APP_DIR/Contents/Resources/menu_m_template.png"
+cp "$ROOT/assets/muesli.icns" "$STAGED_APP_DIR/Contents/Resources/muesli.icns"
+cp "$ROOT/bridge/worker.py" "$STAGED_APP_DIR/Contents/Resources/worker.py"
+cp "$ROOT/bridge/paste_text.py" "$STAGED_APP_DIR/Contents/Resources/paste_text.py"
 
-cat > "$APP_DIR/Contents/Resources/runtime.json" <<JSON
+cat > "$STAGED_APP_DIR/Contents/Resources/runtime.json" <<JSON
 {
   "repo_root": "$ROOT",
   "python_executable": "$PYTHON_BIN"
 }
 JSON
 
-cat > "$APP_DIR/Contents/Info.plist" <<PLIST
+cat > "$STAGED_APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -88,7 +93,13 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-chmod +x "$APP_DIR/Contents/MacOS/Muesli"
-codesign --force --deep --sign - "$APP_DIR" >/dev/null 2>&1 || true
+chmod +x "$STAGED_APP_DIR/Contents/MacOS/Muesli"
 
-echo "Built $APP_DIR"
+mkdir -p "$INSTALL_DIR"
+rm -rf "$APP_DIR"
+ditto "$STAGED_APP_DIR" "$APP_DIR"
+
+codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR" >/dev/null 2>&1 || true
+
+echo "Built $STAGED_APP_DIR"
+echo "Installed $APP_DIR"
