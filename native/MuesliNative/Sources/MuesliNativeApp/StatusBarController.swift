@@ -38,7 +38,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             } else {
                 button.title = "M"
             }
-            button.toolTip = "Muesli"
+            button.toolTip = AppIdentity.displayName
         }
         rebuildMenu()
         statusItem.menu = menu
@@ -47,7 +47,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func rebuildMenu() {
         menu.removeAllItems()
 
-        menu.addItem(actionItem(title: "Open Muesli", action: #selector(MuesliController.openHistoryWindow)))
+        menu.addItem(actionItem(title: "Open \(AppIdentity.displayName)", action: #selector(MuesliController.openHistoryWindow)))
+        let meetingTitle = controller.isMeetingRecording() ? "Stop Meeting Recording" : "Start Meeting Recording"
+        menu.addItem(actionItem(title: meetingTitle, action: #selector(MuesliController.toggleMeetingRecording)))
         menu.addItem(.separator())
 
         let recentItem = NSMenuItem(title: "Recent Dictations", action: nil, keyEquivalent: "")
@@ -103,6 +105,22 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
         menu.setSubmenu(backendMenu, for: backendItem)
         menu.addItem(backendItem)
+
+        let runtimeItem = NSMenuItem(title: "Runtime", action: nil, keyEquivalent: "")
+        let runtimeMenu = NSMenu()
+        for option in TranscriptionRuntimeOption.all {
+            let prefix = controller.selectedRuntime == option ? "✓ " : ""
+            let item = NSMenuItem(
+                title: "\(prefix)\(option.label)",
+                action: #selector(MuesliController.selectRuntimeFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            item.target = controller
+            item.representedObject = option.id
+            runtimeMenu.addItem(item)
+        }
+        menu.setSubmenu(runtimeMenu, for: runtimeItem)
+        menu.addItem(runtimeItem)
 
         let meetingBackendItem = NSMenuItem(title: "Meetings Backend", action: nil, keyEquivalent: "")
         let meetingBackendMenu = NSMenu()

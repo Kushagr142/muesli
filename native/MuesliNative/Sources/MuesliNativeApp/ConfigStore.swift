@@ -6,8 +6,7 @@ final class ConfigStore {
     private let decoder = JSONDecoder()
 
     init() {
-        let supportURL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Muesli", isDirectory: true)
+        let supportURL = AppIdentity.supportDirectoryURL
         self.configURL = supportURL.appendingPathComponent("config.json")
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     }

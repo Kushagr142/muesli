@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import Foundation
 
 @MainActor
@@ -26,7 +27,7 @@ private final class HoverIndicatorView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
-        owner?.setHovered(false)
+        owner?.scheduleHoverExit()
     }
 }
 
@@ -38,6 +39,7 @@ final class FloatingIndicatorController {
     private var textLabel: NSTextField?
     private var state: DictationState = .idle
     private var isHovered = false
+    private var hoverExitWorkItem: DispatchWorkItem?
     private let configStore: ConfigStore
 
     init(configStore: ConfigStore) {
@@ -45,6 +47,8 @@ final class FloatingIndicatorController {
     }
 
     func setState(_ state: DictationState, config: AppConfig) {
+        let previousState = self.state
+        let previousHover = isHovered
         self.state = state
         if state != .idle {
             isHovered = false
@@ -58,20 +62,43 @@ final class FloatingIndicatorController {
         }
         guard let panel, let contentView, let iconLabel, let textLabel else { return }
         let style = styleForState(state)
-        panel.setFrame(frameForState(state, config: config), display: true)
-        contentView.frame = NSRect(origin: .zero, size: panel.frame.size)
-        contentView.layer?.cornerRadius = panel.frame.height / 2
-        contentView.layer?.backgroundColor = style.background.cgColor
-        contentView.layer?.borderWidth = 1.0
-        contentView.layer?.borderColor = style.border.cgColor
+        let targetFrame = frameForState(state, config: config)
         iconLabel.stringValue = style.icon
         iconLabel.textColor = style.iconColor
         textLabel.stringValue = style.title
         textLabel.textColor = style.textColor
         textLabel.isHidden = style.title.isEmpty
 
-        layoutLabels(iconLabel: iconLabel, textLabel: textLabel, in: panel.frame.size, hasTitle: !style.title.isEmpty)
-        panel.alphaValue = style.alpha
+        let duration = transitionDuration(
+            from: previousState,
+            to: state,
+            wasHovered: previousHover,
+            isHovered: isHovered
+        )
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = duration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.allowsImplicitAnimation = true
+
+            panel.animator().setFrame(targetFrame, display: true)
+            panel.animator().alphaValue = style.alpha
+
+            contentView.animator().frame = NSRect(origin: .zero, size: targetFrame.size)
+            contentView.layer?.cornerRadius = targetFrame.height / 2
+            contentView.layer?.backgroundColor = style.background.cgColor
+            contentView.layer?.borderWidth = 1.0
+            contentView.layer?.borderColor = style.border.cgColor
+
+            layoutLabels(
+                iconLabel: iconLabel,
+                textLabel: textLabel,
+                in: targetFrame.size,
+                hasTitle: !style.title.isEmpty,
+                animated: true
+            )
+        }
+
         panel.orderFrontRegardless()
     }
 
@@ -81,12 +108,27 @@ final class FloatingIndicatorController {
 
     func setHovered(_ hovered: Bool) {
         guard state == .idle, isHovered != hovered else { return }
+        hoverExitWorkItem?.cancel()
         isHovered = hovered
         let config = configStore.load()
         setState(.idle, config: config)
     }
 
+    func scheduleHoverExit() {
+        guard state == .idle, isHovered else { return }
+        hoverExitWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard !self.pointerIsInsidePanel() else { return }
+            self.setHovered(false)
+        }
+        hoverExitWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.14, execute: workItem)
+    }
+
     func close() {
+        hoverExitWorkItem?.cancel()
+        hoverExitWorkItem = nil
         panel?.close()
         panel = nil
         contentView = nil
@@ -208,18 +250,36 @@ final class FloatingIndicatorController {
         }
     }
 
-    private func layoutLabels(iconLabel: NSTextField, textLabel: NSTextField, in size: NSSize, hasTitle: Bool) {
+    private func transitionDuration(from oldState: DictationState, to newState: DictationState, wasHovered: Bool, isHovered: Bool) -> TimeInterval {
+        if oldState == .idle, newState == .idle, wasHovered != isHovered {
+            return isHovered ? 0.24 : 0.2
+        }
+        if oldState == .idle || newState == .idle {
+            return 0.18
+        }
+        return 0.16
+    }
+
+    private func layoutLabels(iconLabel: NSTextField, textLabel: NSTextField, in size: NSSize, hasTitle: Bool, animated: Bool) {
         if !hasTitle {
             let iconSize = iconLabel.attributedStringValue.size()
             let iconWidth = max(26, ceil(iconSize.width) + 4)
             let iconHeight = max(18, ceil(iconSize.height))
-            iconLabel.frame = NSRect(
+            let iconFrame = NSRect(
                 x: (size.width - iconWidth) / 2,
                 y: (size.height - iconHeight) / 2,
                 width: iconWidth,
                 height: iconHeight
             )
-            textLabel.frame = .zero
+            if animated {
+                iconLabel.animator().frame = iconFrame
+                textLabel.animator().alphaValue = 0
+                textLabel.animator().frame = .zero
+            } else {
+                iconLabel.frame = iconFrame
+                textLabel.alphaValue = 0
+                textLabel.frame = .zero
+            }
             return
         }
 
@@ -235,18 +295,32 @@ final class FloatingIndicatorController {
         let totalWidth = iconWidth + gap + textWidth
         let originX = max((size.width - totalWidth) / 2, 12)
 
-        iconLabel.frame = NSRect(
+        let iconFrame = NSRect(
             x: originX,
             y: (size.height - iconHeight) / 2,
             width: iconWidth,
             height: iconHeight
         )
-        textLabel.frame = NSRect(
+        let textFrame = NSRect(
             x: originX + iconWidth + gap,
             y: (size.height - textHeight) / 2,
             width: textWidth,
             height: textHeight
         )
+        if animated {
+            iconLabel.animator().frame = iconFrame
+            textLabel.animator().alphaValue = 1
+            textLabel.animator().frame = textFrame
+        } else {
+            iconLabel.frame = iconFrame
+            textLabel.alphaValue = 1
+            textLabel.frame = textFrame
+        }
+    }
+
+    private func pointerIsInsidePanel() -> Bool {
+        guard let panel else { return false }
+        return panel.frame.contains(NSEvent.mouseLocation)
     }
 }
 

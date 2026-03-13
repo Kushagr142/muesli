@@ -7,18 +7,21 @@ final class MuesliController: NSObject {
     private let runtime: RuntimePaths
     private let configStore = ConfigStore()
     private let dictationStore = DictationStore()
-    private let workerClient: PythonWorkerClient
+    private let transcriptionCoordinator: TranscriptionCoordinator
     private let hotkeyMonitor = HotkeyMonitor()
     private let recorder = MicrophoneRecorder()
     private let indicator: FloatingIndicatorController
+    private let calendarMonitor = CalendarMonitor()
 
     private var statusBarController: StatusBarController?
     private var historyWindowController: RecentHistoryWindowController?
     private var preferencesWindowController: PreferencesWindowController?
 
     private(set) var config: AppConfig
+    private(set) var selectedRuntime: TranscriptionRuntimeOption
     private(set) var selectedBackend: BackendOption
     private(set) var selectedMeetingSummaryBackend: MeetingSummaryBackendOption
+    private var activeMeetingSession: MeetingSession?
     private var dictationStartedAt: Date?
     private var openWindowCount = 0
     private var lastExternalApp: NSRunningApplication?
@@ -28,13 +31,16 @@ final class MuesliController: NSObject {
         let loadedConfig = configStore.load()
         self.runtime = runtime
         self.config = loadedConfig
+        self.selectedRuntime = TranscriptionRuntimeOption.all.first(where: {
+            $0.id == loadedConfig.transcriptionRuntime
+        }) ?? .native
         self.selectedBackend = BackendOption.all.first(where: {
             $0.backend == loadedConfig.sttBackend && $0.model == loadedConfig.sttModel
         }) ?? .whisper
         self.selectedMeetingSummaryBackend = MeetingSummaryBackendOption.all.first(where: {
             $0.backend == loadedConfig.meetingSummaryBackend
         }) ?? .openAI
-        self.workerClient = PythonWorkerClient(runtime: runtime)
+        self.transcriptionCoordinator = TranscriptionCoordinator(runtime: runtime)
         self.indicator = FloatingIndicatorController(configStore: configStore)
         super.init()
     }
@@ -42,7 +48,6 @@ final class MuesliController: NSObject {
     func start() {
         do {
             try dictationStore.migrateIfNeeded()
-            try workerClient.start()
         } catch {
             fputs("[muesli-native] startup error: \(error)\n", stderr)
         }
@@ -69,7 +74,19 @@ final class MuesliController: NSObject {
         historyWindowController = RecentHistoryWindowController(store: dictationStore, controller: self)
         refreshUI()
 
-        workerClient.preloadBackend(option: selectedBackend) { _ in }
+        calendarMonitor.onMeetingSoon = { [weak self] event in
+            self?.handleUpcomingMeeting(event)
+        }
+        calendarMonitor.start()
+
+        Task { [weak self] in
+            guard let self else { return }
+            let runtime = await self.transcriptionCoordinator.preload(config: self.config, option: self.selectedBackend)
+            await MainActor.run {
+                self.selectedRuntime = runtime
+                self.refreshUI()
+            }
+        }
 
         if config.openDashboardOnLaunch {
             openHistoryWindow()
@@ -82,8 +99,11 @@ final class MuesliController: NSObject {
             self.workspaceObserver = nil
         }
         hotkeyMonitor.stop()
+        calendarMonitor.stop()
         recorder.cancel()
-        workerClient.stop()
+        Task {
+            await transcriptionCoordinator.shutdown()
+        }
         indicator.close()
     }
 
@@ -136,6 +156,9 @@ final class MuesliController: NSObject {
     func updateConfig(_ mutate: (inout AppConfig) -> Void) {
         mutate(&config)
         configStore.save(config)
+        selectedRuntime = TranscriptionRuntimeOption.all.first(where: {
+            $0.id == config.transcriptionRuntime
+        }) ?? .native
         selectedBackend = BackendOption.all.first(where: {
             $0.backend == config.sttBackend && $0.model == config.sttModel
         }) ?? .whisper
@@ -156,14 +179,34 @@ final class MuesliController: NSObject {
             $0.sttBackend = option.backend
             $0.sttModel = option.model
         }
-        workerClient.preloadBackend(option: option) { [weak self] _ in
-            self?.statusBarController?.refresh()
+        Task { [weak self] in
+            guard let self else { return }
+            let runtime = await self.transcriptionCoordinator.preload(config: self.config, option: option)
+            await MainActor.run {
+                self.selectedRuntime = runtime
+                self.statusBarController?.refresh()
+                self.historyWindowController?.updateBackendLabel()
+            }
         }
     }
 
     func selectMeetingSummaryBackend(_ option: MeetingSummaryBackendOption) {
         updateConfig {
             $0.meetingSummaryBackend = option.backend
+        }
+    }
+
+    func selectRuntime(_ option: TranscriptionRuntimeOption) {
+        updateConfig {
+            $0.transcriptionRuntime = option.id
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            let runtime = await self.transcriptionCoordinator.preload(config: self.config, option: self.selectedBackend)
+            await MainActor.run {
+                self.selectedRuntime = runtime
+                self.refreshUI()
+            }
         }
     }
 
@@ -201,6 +244,12 @@ final class MuesliController: NSObject {
         selectBackend(option)
     }
 
+    @objc func selectRuntimeFromMenu(_ sender: NSMenuItem) {
+        guard let runtimeID = sender.representedObject as? String,
+              let option = TranscriptionRuntimeOption.all.first(where: { $0.id == runtimeID }) else { return }
+        selectRuntime(option)
+    }
+
     @objc func selectMeetingSummaryBackendFromMenu(_ sender: NSMenuItem) {
         guard let label = sender.representedObject as? String,
               let option = MeetingSummaryBackendOption.all.first(where: { $0.label == label }) else { return }
@@ -217,6 +266,70 @@ final class MuesliController: NSObject {
         try? dictationStore.clearMeetings()
         statusBarController?.refresh()
         historyWindowController?.reload()
+    }
+
+    func isMeetingRecording() -> Bool {
+        activeMeetingSession?.isRecording == true
+    }
+
+    @objc func toggleMeetingRecording() {
+        if isMeetingRecording() {
+            stopMeetingRecording()
+        } else {
+            startMeetingRecording()
+        }
+    }
+
+    func startMeetingRecording(title: String = "Meeting") {
+        guard !isMeetingRecording() else { return }
+        let meetingBackend = selectedBackend.nativeModel == nil ? BackendOption.whisper : selectedBackend
+        let meetingSession = MeetingSession(
+            title: title,
+            calendarEventID: nil,
+            backend: meetingBackend,
+            runtime: runtime,
+            config: config,
+            transcriptionCoordinator: transcriptionCoordinator
+        )
+        do {
+            try meetingSession.start()
+            activeMeetingSession = meetingSession
+            statusBarController?.setStatus("Meeting: \(title)")
+            indicator.setState(.recording, config: config)
+            statusBarController?.refresh()
+        } catch {
+            fputs("[muesli-native] failed to start meeting: \(error)\n", stderr)
+            setState(.idle)
+        }
+    }
+
+    func stopMeetingRecording() {
+        guard let activeMeetingSession else { return }
+        setState(.transcribing)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try await activeMeetingSession.stop()
+                try self.dictationStore.insertMeeting(
+                    title: result.title,
+                    calendarEventID: result.calendarEventID,
+                    startTime: result.startTime,
+                    endTime: result.endTime,
+                    rawTranscript: result.rawTranscript,
+                    formattedNotes: result.formattedNotes,
+                    micAudioPath: result.micAudioPath,
+                    systemAudioPath: result.systemAudioPath
+                )
+            } catch {
+                fputs("[muesli-native] meeting transcription failed: \(error)\n", stderr)
+            }
+            await MainActor.run {
+                self.activeMeetingSession = nil
+                self.setState(.idle)
+                self.statusBarController?.refresh()
+                self.historyWindowController?.reload()
+            }
+        }
     }
 
     func copyToClipboard(_ text: String) {
@@ -253,6 +366,9 @@ final class MuesliController: NSObject {
     }
 
     private func handlePrepare() {
+        if isMeetingRecording() {
+            return
+        }
         fputs("[muesli-native] prepare\n", stderr)
         do {
             try recorder.prepare()
@@ -264,6 +380,9 @@ final class MuesliController: NSObject {
     }
 
     private func handleStart() {
+        if isMeetingRecording() {
+            return
+        }
         fputs("[muesli-native] recording start\n", stderr)
         do {
             try recorder.start()
@@ -276,6 +395,9 @@ final class MuesliController: NSObject {
     }
 
     private func handleCancel() {
+        if isMeetingRecording() {
+            return
+        }
         fputs("[muesli-native] cancel\n", stderr)
         recorder.cancel()
         dictationStartedAt = nil
@@ -283,6 +405,9 @@ final class MuesliController: NSObject {
     }
 
     private func handleStop() {
+        if isMeetingRecording() {
+            return
+        }
         fputs("[muesli-native] stop\n", stderr)
         let startedAt = dictationStartedAt ?? Date()
         dictationStartedAt = nil
@@ -300,29 +425,53 @@ final class MuesliController: NSObject {
         }
 
         setState(.transcribing)
-        workerClient.transcribeFile(wavURL: wavURL, option: selectedBackend) { [weak self] result in
+        Task { [weak self] in
             guard let self else { return }
             defer {
                 try? FileManager.default.removeItem(at: wavURL)
-                self.setState(.idle)
             }
 
-            switch result {
-            case .success(let payload):
-                let text = (payload["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty else { return }
+            do {
+                let execution = try await self.transcriptionCoordinator.transcribeDictation(
+                    at: wavURL,
+                    config: self.config,
+                    option: self.selectedBackend
+                )
+                let text = execution.result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                await MainActor.run {
+                    self.selectedRuntime = execution.runtime
+                }
+                guard !text.isEmpty else {
+                    await MainActor.run {
+                        self.setState(.idle)
+                    }
+                    return
+                }
                 try? self.dictationStore.insertDictation(
                     text: text,
                     durationSeconds: duration,
                     startedAt: startedAt,
                     endedAt: Date()
                 )
-                self.statusBarController?.refresh()
-                self.historyWindowController?.reload()
-                PasteController.paste(text: text)
-            case .failure(let error):
+                await MainActor.run {
+                    self.statusBarController?.refresh()
+                    self.historyWindowController?.reload()
+                    PasteController.paste(text: text)
+                    self.setState(.idle)
+                }
+            } catch {
                 fputs("[muesli-native] transcription failed: \(error)\n", stderr)
+                await MainActor.run {
+                    self.setState(.idle)
+                }
             }
+        }
+    }
+
+    private func handleUpcomingMeeting(_ event: UpcomingMeetingEvent) {
+        fputs("[muesli-native] meeting soon: \(event.title)\n", stderr)
+        if config.autoRecordMeetings, !isMeetingRecording() {
+            startMeetingRecording(title: event.title)
         }
     }
 }

@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.start()
         } catch {
             let alert = NSAlert()
-            alert.messageText = "Muesli failed to start"
+            alert.messageText = "\(AppIdentity.displayName) failed to start"
             alert.informativeText = error.localizedDescription
             alert.runModal()
             NSApplication.shared.terminate(nil)

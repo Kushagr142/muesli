@@ -4,20 +4,40 @@ struct BackendOption: Equatable {
     let backend: String
     let model: String
     let label: String
+    let nativeModel: String?
 
     static let whisper = BackendOption(
         backend: "whisper",
         model: "mlx-community/whisper-small.en-mlx",
-        label: "Whisper Small"
+        label: "Whisper Small",
+        nativeModel: "small"
     )
 
     static let qwen = BackendOption(
         backend: "qwen",
         model: "mlx-community/Qwen3-ASR-0.6B-4bit",
-        label: "Qwen3 ASR 0.6B 4-bit"
+        label: "Qwen3 ASR 0.6B 4-bit",
+        nativeModel: nil
     )
 
     static let all: [BackendOption] = [.whisper, .qwen]
+}
+
+struct TranscriptionRuntimeOption: Equatable {
+    let id: String
+    let label: String
+
+    static let native = TranscriptionRuntimeOption(
+        id: "native",
+        label: "Native Swift"
+    )
+
+    static let legacyPython = TranscriptionRuntimeOption(
+        id: "legacy_python",
+        label: "Legacy Python"
+    )
+
+    static let all: [TranscriptionRuntimeOption] = [.native, .legacyPython]
 }
 
 struct MeetingSummaryBackendOption: Equatable {
@@ -39,6 +59,7 @@ struct MeetingSummaryBackendOption: Equatable {
 
 struct AppConfig: Codable {
     var hotkey: String = "left_command_hold"
+    var transcriptionRuntime: String = TranscriptionRuntimeOption.native.id
     var sttBackend: String = BackendOption.whisper.backend
     var sttModel: String = BackendOption.whisper.model
     var meetingSummaryBackend: String = MeetingSummaryBackendOption.openAI.backend
@@ -50,9 +71,16 @@ struct AppConfig: Codable {
     var showFloatingIndicator: Bool = true
     var dashboardWindowFrame: WindowFrame? = nil
     var indicatorOrigin: CGPointCodable? = nil
+    var openAIAPIKey: String = ""
+    var openRouterAPIKey: String = ""
+    var openAIModel: String = ""
+    var openRouterModel: String = ""
+    var summaryModel: String = ""
+    var meetingSummaryModel: String = ""
 
     enum CodingKeys: String, CodingKey {
         case hotkey
+        case transcriptionRuntime = "transcription_runtime"
         case sttBackend = "stt_backend"
         case sttModel = "stt_model"
         case meetingSummaryBackend = "meeting_summary_backend"
@@ -64,6 +92,12 @@ struct AppConfig: Codable {
         case showFloatingIndicator = "show_floating_indicator"
         case dashboardWindowFrame = "dashboard_window_frame"
         case indicatorOrigin = "indicator_origin"
+        case openAIAPIKey = "openai_api_key"
+        case openRouterAPIKey = "openrouter_api_key"
+        case openAIModel = "openai_model"
+        case openRouterModel = "openrouter_model"
+        case summaryModel = "summary_model"
+        case meetingSummaryModel = "meeting_summary_model"
     }
 }
 

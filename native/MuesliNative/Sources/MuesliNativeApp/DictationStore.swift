@@ -5,8 +5,7 @@ final class DictationStore {
     private let databaseURL: URL
 
     init() {
-        let supportURL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Muesli", isDirectory: true)
+        let supportURL = AppIdentity.supportDirectoryURL
         self.databaseURL = supportURL.appendingPathComponent("muesli.db")
     }
 
@@ -153,6 +152,52 @@ final class DictationStore {
         return rows
     }
 
+    func insertMeeting(
+        title: String,
+        calendarEventID: String?,
+        startTime: Date,
+        endTime: Date,
+        rawTranscript: String,
+        formattedNotes: String,
+        micAudioPath: String?,
+        systemAudioPath: String?
+    ) throws {
+        let db = try openDatabase()
+        defer { sqlite3_close(db) }
+
+        let sql = """
+        INSERT INTO meetings
+        (title, calendar_event_id, start_time, end_time, duration_seconds, raw_transcript, formatted_notes, mic_audio_path, system_audio_path, word_count, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'meeting')
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw lastError(db)
+        }
+        defer { sqlite3_finalize(statement) }
+
+        let formatter = ISO8601DateFormatter()
+        let startString = formatter.string(from: startTime)
+        let endString = formatter.string(from: endTime)
+        let durationSeconds = max(endTime.timeIntervalSince(startTime), 0)
+        let wordCount = Self.countWords(in: rawTranscript)
+
+        sqlite3_bind_text(statement, 1, (title as NSString).utf8String, -1, nil)
+        bindOptionalText(calendarEventID, at: 2, statement: statement)
+        sqlite3_bind_text(statement, 3, (startString as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(statement, 4, (endString as NSString).utf8String, -1, nil)
+        sqlite3_bind_double(statement, 5, durationSeconds)
+        sqlite3_bind_text(statement, 6, (rawTranscript as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(statement, 7, (formattedNotes as NSString).utf8String, -1, nil)
+        bindOptionalText(micAudioPath, at: 8, statement: statement)
+        bindOptionalText(systemAudioPath, at: 9, statement: statement)
+        sqlite3_bind_int(statement, 10, Int32(wordCount))
+
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw lastError(db)
+        }
+    }
+
     func dictationStats() throws -> DictationStats {
         let db = try openDatabase()
         defer { sqlite3_close(db) }
@@ -269,6 +314,14 @@ final class DictationStore {
     private func stringColumn(_ statement: OpaquePointer?, index: Int32) -> String {
         guard let pointer = sqlite3_column_text(statement, index) else { return "" }
         return String(cString: pointer)
+    }
+
+    private func bindOptionalText(_ value: String?, at index: Int32, statement: OpaquePointer?) {
+        if let value {
+            sqlite3_bind_text(statement, index, (value as NSString).utf8String, -1, nil)
+        } else {
+            sqlite3_bind_null(statement, index)
+        }
     }
 
     private func dictationStreaks(db: OpaquePointer?) throws -> (current: Int, longest: Int) {

@@ -2,63 +2,71 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PACKAGE_DIR="$ROOT/native/MuesliNative"
 DIST_DIR="$ROOT/dist-native"
-STAGED_APP_DIR="$DIST_DIR/Muesli.app"
 INSTALL_DIR="${MUESLI_INSTALL_DIR:-/Applications}"
-APP_DIR="$INSTALL_DIR/Muesli.app"
-SRC_DIR="$ROOT/native/MuesliNative/Sources/MuesliNativeApp"
 BUILD_CONFIG="${1:-release}"
-BUILD_DIR="$ROOT/native/MuesliNative/.build-direct/$BUILD_CONFIG"
-BIN_PATH="$BUILD_DIR/Muesli"
 PYTHON_BIN="$ROOT/.venv/bin/python"
-SIGN_IDENTITY="${MUESLI_SIGN_IDENTITY:--}"
+APP_BINARY="MuesliNativeApp"
+SYSTEM_AUDIO_BINARY="MuesliSystemAudio"
+APP_NAME="${MUESLI_APP_NAME:-Muesli}"
+APP_DISPLAY_NAME="${MUESLI_DISPLAY_NAME:-$APP_NAME}"
+APP_BUNDLE_NAME="${MUESLI_APP_BUNDLE_NAME:-$APP_NAME.app}"
+APP_EXECUTABLE_NAME="${MUESLI_EXECUTABLE_NAME:-Muesli}"
+APP_SUPPORT_DIR_NAME="${MUESLI_SUPPORT_DIR_NAME:-$APP_DISPLAY_NAME}"
+BUNDLE_ID="${MUESLI_BUNDLE_ID:-com.muesli.app}"
+STAGED_APP_DIR="$DIST_DIR/$APP_BUNDLE_NAME"
+APP_DIR="$INSTALL_DIR/$APP_BUNDLE_NAME"
+DEFAULT_SIGN_IDENTITY="Developer ID Application: Pranav Hari Guruvayurappan (58W55QJ567)"
+SIGN_IDENTITY="${MUESLI_SIGN_IDENTITY:-$DEFAULT_SIGN_IDENTITY}"
 
-if [[ ! -x "$PYTHON_BIN" ]]; then
-  echo "Expected Python runtime at $PYTHON_BIN" >&2
-  exit 1
-fi
-
-mkdir -p "$DIST_DIR" "$BUILD_DIR"
+mkdir -p "$DIST_DIR"
 
 set +e
-swiftc "$SRC_DIR"/*.swift \
-  -parse-as-library \
-  -o "$BIN_PATH" \
-  -framework AppKit \
-  -framework AVFoundation \
-  -framework ApplicationServices \
-  -lsqlite3
+swift build --package-path "$PACKAGE_DIR" -c "$BUILD_CONFIG" --product "$APP_BINARY"
 status=$?
 set -e
 
 if [[ $status -ne 0 ]]; then
   cat >&2 <<'EOF'
 Native Swift build failed.
-
-If the error mentions:
-  - redefinition of module 'SwiftBridging'
-  - failed to build module 'AppKit'
-
-then the local Apple Command Line Tools installation is inconsistent and needs to be repaired
-before the native shell can be compiled. Reinstall Command Line Tools or install full Xcode,
-then rerun this script.
 EOF
   exit $status
 fi
 
-rm -rf "$STAGED_APP_DIR"
-mkdir -p "$STAGED_APP_DIR/Contents/MacOS" "$STAGED_APP_DIR/Contents/Resources"
+swift build --package-path "$PACKAGE_DIR" -c "$BUILD_CONFIG" --product "$SYSTEM_AUDIO_BINARY"
+BIN_DIR="$(swift build --package-path "$PACKAGE_DIR" -c "$BUILD_CONFIG" --show-bin-path)"
+APP_BIN="$BIN_DIR/$APP_BINARY"
+SYSTEM_AUDIO_BIN="$BIN_DIR/$SYSTEM_AUDIO_BINARY"
 
-cp "$BIN_PATH" "$STAGED_APP_DIR/Contents/MacOS/Muesli"
+rm -rf "$STAGED_APP_DIR"
+mkdir -p "$STAGED_APP_DIR/Contents/MacOS" "$STAGED_APP_DIR/Contents/Resources" "$STAGED_APP_DIR/Contents/Frameworks"
+
+cp "$APP_BIN" "$STAGED_APP_DIR/Contents/MacOS/Muesli"
 cp "$ROOT/assets/menu_m_template.png" "$STAGED_APP_DIR/Contents/Resources/menu_m_template.png"
 cp "$ROOT/assets/muesli.icns" "$STAGED_APP_DIR/Contents/Resources/muesli.icns"
-cp "$ROOT/bridge/worker.py" "$STAGED_APP_DIR/Contents/Resources/worker.py"
-cp "$ROOT/bridge/paste_text.py" "$STAGED_APP_DIR/Contents/Resources/paste_text.py"
+cp "$SYSTEM_AUDIO_BIN" "$STAGED_APP_DIR/Contents/Resources/MuesliSystemAudio"
+chmod +x "$STAGED_APP_DIR/Contents/Resources/MuesliSystemAudio"
+
+if [[ -f "$ROOT/bridge/worker.py" ]]; then
+  cp "$ROOT/bridge/worker.py" "$STAGED_APP_DIR/Contents/Resources/worker.py"
+fi
+if [[ -f "$ROOT/bridge/paste_text.py" ]]; then
+  cp "$ROOT/bridge/paste_text.py" "$STAGED_APP_DIR/Contents/Resources/paste_text.py"
+fi
+
+while IFS= read -r bundle_path; do
+  ditto "$bundle_path" "$STAGED_APP_DIR/Contents/Resources/$(basename "$bundle_path")"
+done < <(find "$BIN_DIR" -maxdepth 1 -name '*.bundle' -type d)
+
+while IFS= read -r dylib_path; do
+  ditto "$dylib_path" "$STAGED_APP_DIR/Contents/Frameworks/$(basename "$dylib_path")"
+done < <(find "$BIN_DIR" -maxdepth 1 -name '*.dylib' -type f)
 
 cat > "$STAGED_APP_DIR/Contents/Resources/runtime.json" <<JSON
 {
   "repo_root": "$ROOT",
-  "python_executable": "$PYTHON_BIN"
+  "python_executable": "$(if [[ -x "$PYTHON_BIN" ]]; then echo "$PYTHON_BIN"; fi)"
 }
 JSON
 
@@ -68,40 +76,51 @@ cat > "$STAGED_APP_DIR/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleName</key>
-  <string>Muesli</string>
+  <string>$APP_NAME</string>
   <key>CFBundleDisplayName</key>
-  <string>Muesli</string>
+  <string>$APP_DISPLAY_NAME</string>
   <key>CFBundleIdentifier</key>
-  <string>com.muesli.app</string>
+  <string>$BUNDLE_ID</string>
   <key>CFBundleVersion</key>
   <string>0.1.0</string>
   <key>CFBundleShortVersionString</key>
   <string>0.1.0</string>
   <key>CFBundleExecutable</key>
-  <string>Muesli</string>
+  <string>$APP_EXECUTABLE_NAME</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleIconFile</key>
   <string>muesli.icns</string>
+  <key>MuesliSupportDirectoryName</key>
+  <string>$APP_SUPPORT_DIR_NAME</string>
   <key>LSUIElement</key>
   <true/>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Muesli records microphone audio for dictation.</string>
+  <string>$APP_DISPLAY_NAME records microphone audio for dictation.</string>
   <key>NSInputMonitoringUsageDescription</key>
-  <string>Muesli monitors keyboard events to trigger push-to-talk dictation.</string>
+  <string>$APP_DISPLAY_NAME monitors keyboard events to trigger push-to-talk dictation.</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>$APP_DISPLAY_NAME captures system audio during meeting recordings.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>$APP_DISPLAY_NAME reads calendar events to help with meeting recordings.</string>
 </dict>
 </plist>
 PLIST
 
-chmod +x "$STAGED_APP_DIR/Contents/MacOS/Muesli"
+mv "$STAGED_APP_DIR/Contents/MacOS/Muesli" "$STAGED_APP_DIR/Contents/MacOS/$APP_EXECUTABLE_NAME"
+chmod +x "$STAGED_APP_DIR/Contents/MacOS/$APP_EXECUTABLE_NAME"
 
 mkdir -p "$INSTALL_DIR"
 rm -rf "$APP_DIR"
 ditto "$STAGED_APP_DIR" "$APP_DIR"
 
-codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR" >/dev/null 2>&1 || true
+if ! security find-identity -v -p codesigning | grep -Fq "$SIGN_IDENTITY"; then
+  echo "Signing identity not found: $SIGN_IDENTITY" >&2
+  exit 1
+fi
+
+codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR"
 
 rm -rf "$STAGED_APP_DIR"
 
-echo "Staged app cleaned from $STAGED_APP_DIR"
 echo "Installed $APP_DIR"

@@ -132,13 +132,13 @@ final class RecentHistoryWindowController: NSObject, NSTableViewDataSource, NSTa
             backing: .buffered,
             defer: false
         )
-        window.title = "Muesli"
+        window.title = AppIdentity.displayName
         window.isReleasedWhenClosed = false
         window.delegate = self
 
         let content = window.contentView!
 
-        let title = NSTextField(labelWithString: "Welcome back")
+        let title = NSTextField(labelWithString: "Welcome back to \(AppIdentity.displayName)")
         title.font = NSFont.systemFont(ofSize: 28, weight: .bold)
         title.alignment = .center
         title.frame = NSRect(x: 24, y: 696, width: 992, height: 32)
