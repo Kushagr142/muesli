@@ -99,10 +99,12 @@ final class FloatingIndicatorController {
                 textLabel.animator().alphaValue = 0
             } else {
                 iconLabel.isHidden = false
+                iconLabel.animator().alphaValue = 1
                 iconLabel.stringValue = style.icon
                 iconLabel.textColor = style.iconColor
                 textLabel.stringValue = style.title
                 textLabel.textColor = style.textColor
+                textLabel.animator().alphaValue = style.title.isEmpty ? 0 : 1
                 textLabel.isHidden = style.title.isEmpty
                 layoutLabels(
                     iconLabel: iconLabel,
@@ -289,7 +291,7 @@ final class FloatingIndicatorController {
         switch state {
         case .idle:
             size = isHovered ? NSSize(width: 220, height: 36) : NSSize(width: 44, height: 28)
-        case .preparing: size = NSSize(width: 110, height: 32)
+        case .preparing: size = NSSize(width: 126, height: 32)
         case .recording: size = NSSize(width: 80, height: 32)
         case .transcribing: size = NSSize(width: 120, height: 32)
         }
