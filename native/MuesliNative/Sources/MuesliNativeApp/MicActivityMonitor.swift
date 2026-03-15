@@ -55,16 +55,17 @@ final class MicActivityMonitor {
             return
         }
 
-        // Find which running meeting app is likely using the mic
+        // Find which running meeting app is using the mic
+        // Check all running apps (not just active) — the user may have switched away from Meet
         let runningApps = NSWorkspace.shared.runningApplications
         for app in runningApps {
             guard let bundleID = app.bundleIdentifier,
-                  let appName = Self.meetingApps[bundleID],
-                  app.isActive || app.activationPolicy == .regular else { continue }
+                  let appName = Self.meetingApps[bundleID] else { continue }
 
-            // Only trigger once per app activation
+            // Only trigger once per app session
             if lastDetectedBundleID == bundleID { return }
             lastDetectedBundleID = bundleID
+            fputs("[mic-monitor] meeting app detected: \(appName) (\(bundleID))\n", stderr)
             onMeetingAppDetected?(appName)
             return
         }
