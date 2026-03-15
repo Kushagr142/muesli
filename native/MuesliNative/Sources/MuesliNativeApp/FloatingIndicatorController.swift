@@ -85,9 +85,13 @@ final class FloatingIndicatorController {
         self.configStore = configStore
     }
 
+    var onStopToggleDictation: (() -> Void)?
+
     func handleClick() {
         if isMeetingRecording {
             onStopMeeting?()
+        } else if state == .recording {
+            onStopToggleDictation?()
         }
     }
 

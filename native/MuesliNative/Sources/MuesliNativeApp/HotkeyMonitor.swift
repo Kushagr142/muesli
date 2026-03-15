@@ -7,7 +7,10 @@ final class HotkeyMonitor {
     var onStart: (() -> Void)?
     var onStop: (() -> Void)?
     var onCancel: (() -> Void)?
+    var onToggleStart: (() -> Void)?
+    var onToggleStop: (() -> Void)?
     var targetKeyCode: UInt16 = 55
+    var doubleTapEnabled: Bool = true
 
     private var globalMonitor: Any?
     private var localMonitor: Any?
@@ -18,8 +21,14 @@ final class HotkeyMonitor {
     private var prepared = false
     private var active = false
 
+    // Double-tap detection
+    private var lastTapUpTime: Date?
+    private var lastTapWasShort = false
+    private var toggleActive = false
+
     private let prepareDelay: TimeInterval = 0.15
     private let startDelay: TimeInterval = 0.25
+    private let doubleTapWindow: TimeInterval = 0.35
 
     func start() {
         guard globalMonitor == nil, localMonitor == nil else { return }
@@ -60,6 +69,7 @@ final class HotkeyMonitor {
         otherKeyPressed = false
         prepared = false
         active = false
+        toggleActive = false
     }
 
     func configure(keyCode: UInt16) {
@@ -74,8 +84,21 @@ final class HotkeyMonitor {
         start()
     }
 
+    /// Call externally to stop toggle mode (e.g., from floating indicator click)
+    func stopToggleMode() {
+        if toggleActive {
+            toggleActive = false
+            fputs("[hotkey] toggle stopped externally\n", stderr)
+            onToggleStop?()
+        }
+    }
+
     var isRunning: Bool {
         globalMonitor != nil || localMonitor != nil
+    }
+
+    var isToggleRecording: Bool {
+        toggleActive
     }
 
     private func handle(_ event: NSEvent) {
@@ -94,20 +117,60 @@ final class HotkeyMonitor {
         let flags = event.modifierFlags
 
         if keyCode == targetKeyCode {
-            // Detect if the target modifier key is currently pressed
             let isDown = isModifierDown(keyCode: targetKeyCode, flags: flags)
             if isDown {
                 if !targetKeyDown {
-                    fputs("[hotkey] target key \(targetKeyCode) down\n", stderr)
                     targetKeyDown = true
                     otherKeyPressed = false
                     prepared = false
+
+                    // If in toggle mode, stop it on next key press
+                    if toggleActive {
+                        fputs("[hotkey] toggle stop via keypress\n", stderr)
+                        toggleActive = false
+                        cancelTimers()
+                        onToggleStop?()
+                        return
+                    }
+
+                    // Check for double-tap
+                    if doubleTapEnabled,
+                       lastTapWasShort,
+                       let lastUp = lastTapUpTime,
+                       Date().timeIntervalSince(lastUp) < doubleTapWindow {
+                        // Double-tap detected!
+                        fputs("[hotkey] double-tap → toggle start\n", stderr)
+                        lastTapWasShort = false
+                        lastTapUpTime = nil
+                        toggleActive = true
+                        cancelTimers()
+                        onToggleStart?()
+                        return
+                    }
+
+                    fputs("[hotkey] target key \(targetKeyCode) down\n", stderr)
                     scheduleTimers()
                 }
             } else {
                 fputs("[hotkey] target key \(targetKeyCode) up\n", stderr)
+                let wasDown = targetKeyDown
                 targetKeyDown = false
                 cancelTimers()
+
+                if toggleActive {
+                    // Don't stop toggle on key-up — only on next key-down
+                    return
+                }
+
+                // Track tap timing for double-tap detection
+                if wasDown && !active && !prepared && !otherKeyPressed {
+                    // This was a short tap (released before prepareDelay)
+                    lastTapWasShort = true
+                    lastTapUpTime = Date()
+                } else {
+                    lastTapWasShort = false
+                }
+
                 if active {
                     active = false
                     onStop?()
@@ -116,10 +179,10 @@ final class HotkeyMonitor {
                     onCancel?()
                 }
             }
-        } else if targetKeyDown {
-            // Another modifier key pressed while target held — cancel
+        } else if targetKeyDown && !toggleActive {
             fputs("[hotkey] canceled by other modifier key \(keyCode)\n", stderr)
             otherKeyPressed = true
+            lastTapWasShort = false
             cancelTimers()
             if active {
                 active = false
@@ -143,11 +206,12 @@ final class HotkeyMonitor {
     }
 
     private func handleKeyDown(_ event: NSEvent) {
-        if targetKeyDown {
+        if targetKeyDown && !toggleActive {
             let keyCode = event.keyCode
             if keyCode != targetKeyCode {
                 fputs("[hotkey] canceled by other key\n", stderr)
                 otherKeyPressed = true
+                lastTapWasShort = false
                 cancelTimers()
                 if active {
                     active = false
@@ -164,6 +228,7 @@ final class HotkeyMonitor {
         let prepare = DispatchWorkItem { [weak self] in
             guard let self, self.targetKeyDown, !self.otherKeyPressed, !self.prepared else { return }
             self.prepared = true
+            self.lastTapWasShort = false // Held long enough — not a tap
             fputs("[hotkey] prepared\n", stderr)
             self.onPrepare?()
         }

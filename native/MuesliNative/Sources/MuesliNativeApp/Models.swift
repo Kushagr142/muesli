@@ -108,6 +108,7 @@ struct AppConfig: Codable {
     var autoRecordMeetings: Bool = false
     var showMeetingDetectionNotification: Bool = true
     var darkMode: Bool = true
+    var enableDoubleTapDictation: Bool = true
     var launchAtLogin: Bool = false
     var openDashboardOnLaunch: Bool = true
     var showFloatingIndicator: Bool = true
@@ -131,6 +132,7 @@ struct AppConfig: Codable {
         case autoRecordMeetings = "auto_record_meetings"
         case showMeetingDetectionNotification = "show_meeting_detection_notification"
         case darkMode = "dark_mode"
+        case enableDoubleTapDictation = "enable_double_tap_dictation"
         case launchAtLogin = "launch_at_login"
         case openDashboardOnLaunch = "open_dashboard_on_launch"
         case showFloatingIndicator = "show_floating_indicator"
@@ -159,6 +161,7 @@ struct AppConfig: Codable {
         autoRecordMeetings = (try? c.decode(Bool.self, forKey: .autoRecordMeetings)) ?? defaults.autoRecordMeetings
         showMeetingDetectionNotification = (try? c.decode(Bool.self, forKey: .showMeetingDetectionNotification)) ?? defaults.showMeetingDetectionNotification
         darkMode = (try? c.decode(Bool.self, forKey: .darkMode)) ?? defaults.darkMode
+        enableDoubleTapDictation = (try? c.decode(Bool.self, forKey: .enableDoubleTapDictation)) ?? defaults.enableDoubleTapDictation
         launchAtLogin = (try? c.decode(Bool.self, forKey: .launchAtLogin)) ?? defaults.launchAtLogin
         openDashboardOnLaunch = (try? c.decode(Bool.self, forKey: .openDashboardOnLaunch)) ?? defaults.openDashboardOnLaunch
         showFloatingIndicator = (try? c.decode(Bool.self, forKey: .showFloatingIndicator)) ?? defaults.showFloatingIndicator

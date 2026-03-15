@@ -76,8 +76,14 @@ final class MuesliController: NSObject {
         hotkeyMonitor.onStart = { [weak self] in self?.handleStart() }
         hotkeyMonitor.onStop = { [weak self] in self?.handleStop() }
         hotkeyMonitor.onCancel = { [weak self] in self?.handleCancel() }
+        hotkeyMonitor.onToggleStart = { [weak self] in self?.handleToggleStart() }
+        hotkeyMonitor.onToggleStop = { [weak self] in self?.handleToggleStop() }
+        hotkeyMonitor.doubleTapEnabled = config.enableDoubleTapDictation
         hotkeyMonitor.start()
         indicator.onStopMeeting = { [weak self] in self?.stopMeetingRecording() }
+        indicator.onStopToggleDictation = { [weak self] in
+            self?.hotkeyMonitor.stopToggleMode()
+        }
         workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
@@ -493,6 +499,29 @@ final class MuesliController: NSObject {
         recorder.cancel()
         dictationStartedAt = nil
         setState(.idle)
+    }
+
+    private func handleToggleStart() {
+        if isMeetingRecording() { return }
+        fputs("[muesli-native] toggle dictation start\n", stderr)
+        micActivityMonitor.suppressWhileActive()
+        do {
+            try recorder.prepare()
+            try recorder.start()
+            dictationStartedAt = Date()
+            indicator.powerProvider = { [weak self] in
+                self?.recorder.currentPower() ?? -160
+            }
+            setState(.recording)
+        } catch {
+            fputs("[muesli-native] toggle start failed: \(error)\n", stderr)
+            setState(.idle)
+        }
+    }
+
+    private func handleToggleStop() {
+        fputs("[muesli-native] toggle dictation stop\n", stderr)
+        handleStop()
     }
 
     private func handleStop() {

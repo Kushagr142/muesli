@@ -20,6 +20,8 @@ struct ShortcutsView: View {
 
                 shortcutSection
 
+                doubleTapSection
+
                 resetButton
             }
             .padding(MuesliTheme.spacing32)
@@ -93,6 +95,38 @@ struct ShortcutsView: View {
         .overlay(
             RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall)
                 .strokeBorder(isRecording ? MuesliTheme.accent.opacity(0.3) : MuesliTheme.surfaceBorder, lineWidth: 1)
+        )
+    }
+
+    private var doubleTapSection: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing16) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
+                    Text("Hands-Free Mode")
+                        .font(MuesliTheme.headline())
+                        .foregroundStyle(MuesliTheme.textPrimary)
+                    Text("Double-tap to start, tap again to stop")
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { appState.config.enableDoubleTapDictation },
+                    set: { newValue in
+                        controller.updateConfig { $0.enableDoubleTapDictation = newValue }
+                    }
+                ))
+                .toggleStyle(.switch)
+                .tint(MuesliTheme.accent)
+                .labelsHidden()
+            }
+        }
+        .padding(MuesliTheme.spacing16)
+        .background(MuesliTheme.backgroundRaised)
+        .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium))
+        .overlay(
+            RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium)
+                .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
         )
     }
 
