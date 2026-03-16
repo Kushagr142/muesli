@@ -1,4 +1,4 @@
-name: Build macOS App
+name: Build & Release macOS App
 
 on:
   workflow_dispatch:
@@ -10,28 +10,54 @@ permissions:
   contents: write
 
 jobs:
-  build-macos-app:
+  build-and-release:
     runs-on: macos-14
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
+      - name: Run tests
+        run: swift test --package-path native/MuesliNative
 
-      - name: Install app packaging dependencies
+      - name: Build release binary
+        run: swift build --package-path native/MuesliNative -c release --product MuesliNativeApp
+
+      - name: Package app bundle
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-no-torch.txt -r requirements-no-torch-dev.txt "setuptools<81" py2app jaraco.text
+          BIN_DIR="$(swift build --package-path native/MuesliNative -c release --show-bin-path)"
+          APP_DIR="dist/Muesli.app"
 
-      - name: Build py2app bundle
-        run: python setup.py py2app
+          mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
+          cp "$BIN_DIR/MuesliNativeApp" "$APP_DIR/Contents/MacOS/Muesli"
+          chmod +x "$APP_DIR/Contents/MacOS/Muesli"
+          cp assets/menu_m_template.png "$APP_DIR/Contents/Resources/"
+          cp assets/muesli.icns "$APP_DIR/Contents/Resources/"
+          [ -d assets/fonts ] && cp -R assets/fonts "$APP_DIR/Contents/Resources/fonts"
 
-      - name: Postprocess app bundle
-        run: bash scripts/postprocess_py2app_bundle.sh dist/Muesli.app
+          cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>Muesli</string>
+            <key>CFBundleDisplayName</key><string>Muesli</string>
+            <key>CFBundleIdentifier</key><string>com.muesli.app</string>
+            <key>CFBundleVersion</key><string>0.3.0</string>
+            <key>CFBundleShortVersionString</key><string>0.3.0</string>
+            <key>CFBundleExecutable</key><string>Muesli</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleIconFile</key><string>muesli.icns</string>
+            <key>MuesliSupportDirectoryName</key><string>Muesli</string>
+            <key>LSUIElement</key><true/>
+            <key>NSMicrophoneUsageDescription</key><string>Muesli records microphone audio for dictation.</string>
+            <key>NSInputMonitoringUsageDescription</key><string>Muesli monitors keyboard events to trigger push-to-talk dictation.</string>
+            <key>NSScreenCaptureUsageDescription</key><string>Muesli captures system audio during meeting recordings.</string>
+            <key>NSCalendarsFullAccessUsageDescription</key><string>Muesli reads calendar events to help with meeting recordings.</string>
+          </dict>
+          </plist>
+          PLIST
 
       - name: Archive app bundle
         run: ditto -c -k --sequesterRsrc --keepParent dist/Muesli.app dist/Muesli-macos.zip
@@ -49,6 +75,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "Automated macOS app build"
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "Native Swift build — 32MB, zero Python dependency"
           fi
           gh release upload "$GITHUB_REF_NAME" dist/Muesli-macos.zip --clobber

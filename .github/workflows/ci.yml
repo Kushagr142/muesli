@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build (release)
+        run: swift build --package-path native/MuesliNative -c release --product MuesliNativeApp
+
+      - name: Run tests
+        run: swift test --package-path native/MuesliNative
