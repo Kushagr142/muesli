@@ -193,7 +193,7 @@ final class FloatingIndicatorController {
                     let iconWidth = max(24, ceil(iconSize.width) + 2)
                     let iconHeight = max(18, ceil(iconSize.height))
                     iconLabel.frame = NSRect(
-                        x: 10,
+                        x: 8,
                         y: (targetFrame.height - iconHeight) / 2,
                         width: iconWidth,
                         height: iconHeight
@@ -225,7 +225,7 @@ final class FloatingIndicatorController {
         }
 
         if state == .recording {
-            let waveformXOffset: CGFloat = isMeetingRecording ? 32 : 0
+            let waveformXOffset: CGFloat = isMeetingRecording ? 26 : 0
             startWaveformAnimation(in: targetFrame.size, xOffset: waveformXOffset)
         }
 
@@ -402,7 +402,7 @@ final class FloatingIndicatorController {
         case .idle:
             size = isHovered ? NSSize(width: 220, height: 36) : NSSize(width: 44, height: 28)
         case .preparing: size = NSSize(width: 44, height: 28)
-        case .recording: size = isMeetingRecording ? NSSize(width: 100, height: 32) : NSSize(width: 80, height: 32)
+        case .recording: size = isMeetingRecording ? NSSize(width: 72, height: 32) : NSSize(width: 80, height: 32)
         case .transcribing: size = NSSize(width: 120, height: 32)
         }
 
