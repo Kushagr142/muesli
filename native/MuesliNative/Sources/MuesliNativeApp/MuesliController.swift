@@ -78,6 +78,17 @@ final class MuesliController: NSObject {
         indicator.onStopToggleDictation = { [weak self] in
             self?.hotkeyMonitor.stopToggleMode()
         }
+        indicator.onCancelToggleDictation = { [weak self] in
+            self?.handleCancel()
+            self?.indicator.isToggleDictation = false
+            self?.hotkeyMonitor.cancelToggleMode()
+        }
+        hotkeyMonitor.onEscapePressed = { [weak self] in
+            guard let self else { return }
+            if self.isMeetingRecording() {
+                self.discardMeetingWithConfirmation()
+            }
+        }
         workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
@@ -620,7 +631,7 @@ final class MuesliController: NSObject {
             indicator.powerProvider = { [weak self] in
                 self?.recorder.currentPower() ?? -160
             }
-            setState(.recording)
+            indicator.setToggleDictation(true, config: config)
         } catch {
             fputs("[muesli-native] toggle start failed: \(error)\n", stderr)
             setState(.idle)
@@ -629,6 +640,7 @@ final class MuesliController: NSObject {
 
     private func handleToggleStop() {
         fputs("[muesli-native] toggle dictation stop\n", stderr)
+        indicator.isToggleDictation = false
         handleStop()
     }
 

@@ -58,7 +58,8 @@ private final class HoverIndicatorView: NSView {
         } else if event.modifierFlags.contains(.option) {
             owner?.handleOptionClick()
         } else {
-            owner?.handleClick()
+            let clickX = convert(event.locationInWindow, from: nil).x
+            owner?.handleClick(atX: clickX)
         }
         dragOrigin = nil
         didDrag = false
@@ -87,6 +88,9 @@ final class FloatingIndicatorController {
     var powerProvider: (() -> Float)?
     var onStopMeeting: (() -> Void)?
     var onDiscardMeeting: (() -> Void)?
+    var onCancelToggleDictation: (() -> Void)?
+    var isToggleDictation = false
+    private var stopLayer: CALayer?
     var hotkeyLabel: String = "Left Cmd"
 
     init(configStore: ConfigStore) {
@@ -95,9 +99,18 @@ final class FloatingIndicatorController {
 
     var onStopToggleDictation: (() -> Void)?
 
-    func handleClick() {
+    func handleClick(atX x: CGFloat? = nil) {
         if isMeetingRecording {
             onStopMeeting?()
+        } else if state == .recording && isToggleDictation, let x {
+            let width = panel?.frame.width ?? 110
+            if x < 30 {
+                // X region → discard
+                onCancelToggleDictation?()
+            } else {
+                // Stop region or middle → save
+                onStopToggleDictation?()
+            }
         } else if state == .recording {
             onStopToggleDictation?()
         }
@@ -106,6 +119,8 @@ final class FloatingIndicatorController {
     func handleOptionClick() {
         if isMeetingRecording {
             showDiscardConfirmation()
+        } else if state == .recording && isToggleDictation {
+            onCancelToggleDictation?()
         }
     }
 
@@ -156,6 +171,16 @@ final class FloatingIndicatorController {
         var config = configStore.load()
         config.indicatorOrigin = CGPointCodable(x: center.x, y: center.y)
         configStore.save(config)
+    }
+
+    func setToggleDictation(_ active: Bool, config: AppConfig) {
+        isToggleDictation = active
+        if active {
+            setState(.recording, config: config)
+        } else {
+            removeStopLayer()
+            setState(.idle, config: config)
+        }
     }
 
     func setMeetingRecording(_ recording: Bool, config: AppConfig) {
@@ -229,8 +254,21 @@ final class FloatingIndicatorController {
                     )
                     textLabel.animator().alphaValue = 0
                     textLabel.isHidden = true
+                } else if isToggleDictation {
+                    // Toggle dictation: X on left, waveform in middle, stop on right
+                    iconLabel.isHidden = false
+                    iconLabel.animator().alphaValue = 1
+                    iconLabel.stringValue = "\u{2715}"  // ✕
+                    iconLabel.textColor = .white.withAlphaComponent(0.5)
+                    iconLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+                    iconLabel.frame = NSRect(x: 8, y: (targetFrame.height - 18) / 2, width: 20, height: 18)
+
+                    textLabel.animator().alphaValue = 0
+                    textLabel.isHidden = true
+
+                    addStopLayer(in: targetFrame.size)
                 } else {
-                    // Dictation: hide labels entirely, waveform replaces
+                    // Hold dictation: hide labels entirely, waveform replaces
                     iconLabel.animator().alphaValue = 0
                     textLabel.animator().alphaValue = 0
                 }
@@ -256,6 +294,8 @@ final class FloatingIndicatorController {
         if state == .recording {
             if isMeetingRecording {
                 startWaveformAnimation(in: targetFrame.size, xOffset: 26, barCount: 4)
+            } else if isToggleDictation {
+                startWaveformAnimation(in: targetFrame.size, xOffset: 28, rightPadding: 28)
             } else {
                 startWaveformAnimation(in: targetFrame.size)
             }
@@ -299,6 +339,46 @@ final class FloatingIndicatorController {
         textLabel = nil
     }
 
+    // MARK: - Stop Layer (toggle dictation)
+
+    private func addStopLayer(in size: NSSize) {
+        removeStopLayer()
+        guard let contentView else { return }
+
+        // Red circle background
+        let circleSize: CGFloat = 20
+        let circle = CALayer()
+        circle.frame = CGRect(
+            x: size.width - circleSize - 8,
+            y: (size.height - circleSize) / 2,
+            width: circleSize,
+            height: circleSize
+        )
+        circle.cornerRadius = circleSize / 2
+        circle.backgroundColor = NSColor(red: 0.95, green: 0.3, blue: 0.3, alpha: 1.0).cgColor
+
+        // White square inside
+        let squareSize: CGFloat = 8
+        let square = CALayer()
+        square.frame = CGRect(
+            x: (circleSize - squareSize) / 2,
+            y: (circleSize - squareSize) / 2,
+            width: squareSize,
+            height: squareSize
+        )
+        square.cornerRadius = 1.5
+        square.backgroundColor = NSColor.white.cgColor
+        circle.addSublayer(square)
+
+        contentView.layer?.addSublayer(circle)
+        stopLayer = circle
+    }
+
+    private func removeStopLayer() {
+        stopLayer?.removeFromSuperlayer()
+        stopLayer = nil
+    }
+
     // MARK: - Waveform Animation
 
     private static let barCount = 5
@@ -309,7 +389,7 @@ final class FloatingIndicatorController {
     private static let barMultipliers5: [CGFloat] = [0.6, 0.85, 1.0, 0.85, 0.6]
     private static let barMultipliers4: [CGFloat] = [0.7, 1.0, 1.0, 0.7]
 
-    private func startWaveformAnimation(in size: NSSize, xOffset: CGFloat = 0, barCount: Int? = nil) {
+    private func startWaveformAnimation(in size: NSSize, xOffset: CGFloat = 0, rightPadding: CGFloat = 0, barCount: Int? = nil) {
         let savedProvider = powerProvider
         stopWaveformAnimation()
         powerProvider = savedProvider
@@ -318,7 +398,7 @@ final class FloatingIndicatorController {
         let count = barCount ?? Self.barCount
         let multipliers = count == 4 ? Self.barMultipliers4 : Self.barMultipliers5
         let totalWidth = CGFloat(count) * Self.barWidth + CGFloat(count - 1) * Self.barSpacing
-        let availableWidth = size.width - xOffset
+        let availableWidth = size.width - xOffset - rightPadding
         let startX = xOffset + (availableWidth - totalWidth) / 2
 
         for i in 0..<count {
@@ -368,6 +448,7 @@ final class FloatingIndicatorController {
         barLayers.removeAll()
         smoothedAmplitude = 0
         powerProvider = nil
+        removeStopLayer()
     }
 
     private func updateBarAmplitudes() {
@@ -438,7 +519,14 @@ final class FloatingIndicatorController {
         case .idle:
             size = isHovered ? NSSize(width: 220, height: 36) : NSSize(width: 44, height: 28)
         case .preparing: size = NSSize(width: 44, height: 28)
-        case .recording: size = isMeetingRecording ? NSSize(width: 72, height: 32) : NSSize(width: 80, height: 32)
+        case .recording:
+            if isMeetingRecording {
+                size = NSSize(width: 72, height: 32)
+            } else if isToggleDictation {
+                size = NSSize(width: 110, height: 32)
+            } else {
+                size = NSSize(width: 80, height: 32)
+            }
         case .transcribing: size = NSSize(width: 120, height: 32)
         }
 

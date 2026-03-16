@@ -9,6 +9,7 @@ final class HotkeyMonitor {
     var onCancel: (() -> Void)?
     var onToggleStart: (() -> Void)?
     var onToggleStop: (() -> Void)?
+    var onEscapePressed: (() -> Void)?
     var targetKeyCode: UInt16 = 55
     var doubleTapEnabled: Bool = true
 
@@ -90,6 +91,14 @@ final class HotkeyMonitor {
             toggleActive = false
             fputs("[hotkey] toggle stopped externally\n", stderr)
             onToggleStop?()
+        }
+    }
+
+    /// Cancel toggle mode without triggering onToggleStop (discard path)
+    func cancelToggleMode() {
+        if toggleActive {
+            toggleActive = false
+            fputs("[hotkey] toggle cancelled externally\n", stderr)
         }
     }
 
@@ -206,8 +215,31 @@ final class HotkeyMonitor {
     }
 
     private func handleKeyDown(_ event: NSEvent) {
+        let keyCode = event.keyCode
+
+        // Escape cancels any active recording
+        if keyCode == 53 {
+            if toggleActive {
+                fputs("[hotkey] escape → cancel toggle\n", stderr)
+                toggleActive = false
+                cancelTimers()
+                onCancel?()
+                return
+            }
+            if active {
+                fputs("[hotkey] escape → cancel hold\n", stderr)
+                active = false
+                targetKeyDown = false
+                cancelTimers()
+                onCancel?()
+                return
+            }
+            // For meetings, the escape is handled by onEscapePressed
+            onEscapePressed?()
+            return
+        }
+
         if targetKeyDown && !toggleActive {
-            let keyCode = event.keyCode
             if keyCode != targetKeyCode {
                 fputs("[hotkey] canceled by other key\n", stderr)
                 otherKeyPressed = true
