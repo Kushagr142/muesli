@@ -70,11 +70,13 @@ actor TranscriptionCoordinator {
     }
 
     func transcribeDictation(at url: URL, backend: BackendOption, customWords: [[String: Any]] = []) async throws -> SpeechTranscriptionResult {
-        try await route(url: url, backend: backend)
+        let result = try await route(url: url, backend: backend)
+        return applyCustomWords(result, customWords: customWords)
     }
 
     func transcribeMeeting(at url: URL, backend: BackendOption, customWords: [[String: Any]] = []) async throws -> SpeechTranscriptionResult {
-        try await route(url: url, backend: backend)
+        let result = try await route(url: url, backend: backend)
+        return applyCustomWords(result, customWords: customWords)
     }
 
     func transcribeMeetingChunk(at url: URL, backend: BackendOption, customWords: [[String: Any]] = []) async throws -> SpeechTranscriptionResult {
@@ -91,7 +93,8 @@ actor TranscriptionCoordinator {
                 fputs("[muesli-native] VAD check failed, transcribing anyway: \(error)\n", stderr)
             }
         }
-        return try await route(url: url, backend: backend)
+        let result = try await route(url: url, backend: backend)
+        return applyCustomWords(result, customWords: customWords)
     }
 
     func shutdown() {
@@ -102,6 +105,17 @@ actor TranscriptionCoordinator {
                 await nemotronTranscriber.shutdown()
             }
         }
+    }
+
+    private func applyCustomWords(_ result: SpeechTranscriptionResult, customWords: [[String: Any]]) -> SpeechTranscriptionResult {
+        guard !customWords.isEmpty, !result.text.isEmpty else { return result }
+        let entries = customWords.compactMap { dict -> CustomWord? in
+            guard let word = dict["word"] as? String else { return nil }
+            return CustomWord(word: word, replacement: dict["replacement"] as? String)
+        }
+        guard !entries.isEmpty else { return result }
+        let correctedText = CustomWordMatcher.apply(text: result.text, customWords: entries)
+        return SpeechTranscriptionResult(text: correctedText, segments: result.segments)
     }
 
     private func route(url: URL, backend: BackendOption) async throws -> SpeechTranscriptionResult {

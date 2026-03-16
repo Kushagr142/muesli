@@ -24,6 +24,23 @@ struct ModelsView: View {
                         modelCard(option: option)
                     }
                 }
+
+                if !BackendOption.comingSoon.isEmpty {
+                    VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+                        Text("COMING SOON")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(MuesliTheme.textTertiary)
+                            .textCase(.uppercase)
+                            .padding(.leading, 2)
+                            .padding(.top, MuesliTheme.spacing8)
+
+                        VStack(spacing: MuesliTheme.spacing12) {
+                            ForEach(BackendOption.comingSoon, id: \.model) { option in
+                                comingSoonCard(option: option)
+                            }
+                        }
+                    }
+                }
             }
             .padding(MuesliTheme.spacing32)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -150,20 +167,69 @@ struct ModelsView: View {
         )
     }
 
+    private func comingSoonCard(option: BackendOption) -> some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
+                    HStack(spacing: MuesliTheme.spacing8) {
+                        Text(option.label)
+                            .font(MuesliTheme.headline())
+                            .foregroundStyle(MuesliTheme.textTertiary)
+
+                        Text("Experimental")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(MuesliTheme.textTertiary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(MuesliTheme.surfacePrimary)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                        Text(option.sizeLabel)
+                            .font(MuesliTheme.caption())
+                            .foregroundStyle(MuesliTheme.textTertiary.opacity(0.6))
+                    }
+
+                    Text(option.description)
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textTertiary.opacity(0.7))
+                }
+                Spacer()
+            }
+        }
+        .padding(MuesliTheme.spacing16)
+        .background(MuesliTheme.backgroundRaised.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium))
+        .overlay(
+            RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium)
+                .strokeBorder(MuesliTheme.surfaceBorder.opacity(0.5), lineWidth: 1)
+        )
+        .opacity(0.6)
+    }
+
     // MARK: - Actions
 
     private func startDownload(_ option: BackendOption) {
-        downloadingModels.insert(option.model)
-        downloadProgress[option.model] = 0
+        withAnimation { downloadingModels.insert(option.model) }
+        downloadProgress[option.model] = 0.05  // Show initial progress immediately
 
+        let startTime = Date()
         Task {
             await controller.transcriptionCoordinator.preload(backend: option) { progress, _ in
-                downloadProgress[option.model] = progress
+                DispatchQueue.main.async {
+                    downloadProgress[option.model] = max(progress, 0.05)
+                }
+            }
+            // Ensure the downloading state is visible for at least 1.5s
+            let elapsed = Date().timeIntervalSince(startTime)
+            if elapsed < 1.5 {
+                try? await Task.sleep(nanoseconds: UInt64((1.5 - elapsed) * 1_000_000_000))
             }
             await MainActor.run {
-                downloadingModels.remove(option.model)
-                downloadedModels.insert(option.model)
-                downloadProgress.removeValue(forKey: option.model)
+                withAnimation {
+                    downloadingModels.remove(option.model)
+                    downloadedModels.insert(option.model)
+                    downloadProgress.removeValue(forKey: option.model)
+                }
             }
         }
     }

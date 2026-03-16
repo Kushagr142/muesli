@@ -26,7 +26,15 @@ actor WhisperCppTranscriber {
         let modelPath = try await ensureModelDownloaded(modelName: modelName, progress: progress)
         if loadedModelPath == modelPath, whisper != nil { return }
 
-        fputs("[whisper.cpp] loading model: \(modelName)...\n", stderr)
+        // Validate file size — ggml models are at least 10MB
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: modelPath)[.size] as? Int) ?? 0
+        if fileSize < 10_000_000 {
+            // Corrupted/incomplete download — delete and throw
+            try? FileManager.default.removeItem(atPath: modelPath)
+            throw TranscriberError.modelDownloadFailed("Downloaded file is too small (\(fileSize) bytes), likely corrupted. Deleted — try again.")
+        }
+
+        fputs("[whisper.cpp] loading model: \(modelName) (\(fileSize / 1_000_000)MB)...\n", stderr)
         progress?(0.95, "Loading model...")
         let modelURL = URL(fileURLWithPath: modelPath)
         whisper = Whisper(fromFileURL: modelURL)
@@ -63,7 +71,7 @@ actor WhisperCppTranscriber {
 
     private static let modelURLs: [String: String] = [
         "ggml-small.en": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin",
-        "ggml-small.en-q5_0": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en-q5_0.bin",
+        "ggml-small.en-q5_1": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en-q5_1.bin",
         "ggml-medium.en": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin",
         "ggml-large-v3-turbo": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
         "ggml-large-v3-turbo-q5_0": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",

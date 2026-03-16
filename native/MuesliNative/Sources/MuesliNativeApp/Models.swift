@@ -28,9 +28,9 @@ struct BackendOption: Equatable {
 
     static let whisperSmall = BackendOption(
         backend: "whisper",
-        model: "ggml-small.en-q5_0",
+        model: "ggml-small.en-q5_1",
         label: "Whisper Small",
-        sizeLabel: "~180 MB",
+        sizeLabel: "~190 MB",
         description: "Fast, English-optimized. Quantized for smaller download.",
         recommended: false
     )
