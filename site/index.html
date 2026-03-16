@@ -57,8 +57,8 @@
       content: '';
       position: fixed; inset: 0;
       background:
-        radial-gradient(ellipse at 50% 50%, rgba(239,68,68,0.035) 0%, transparent 55%),
-        radial-gradient(ellipse at 78% 22%, rgba(107,163,247,0.018) 0%, transparent 35%);
+        radial-gradient(ellipse at 50% 50%, rgba(107,163,247,0.03) 0%, transparent 55%),
+        radial-gradient(ellipse at 78% 22%, rgba(107,163,247,0.02) 0%, transparent 40%);
       pointer-events: none;
       z-index: 0;
     }
@@ -103,8 +103,8 @@
       letter-spacing: 0.03em;
     }
 
-    .q.rev { color: rgba(239,68,68,1); }
-    .q.rev cite { color: rgba(239,68,68,0.5); }
+    .q.rev { color: rgba(107,163,247,1); }
+    .q.rev cite { color: rgba(107,163,247,0.5); }
 
     /* ── center content ── */
     .core {
@@ -283,11 +283,11 @@
 
   <!-- constructivist arcs + diagonals -->
   <svg class="geo" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid slice">
-    <circle cx="500" cy="500" r="260" stroke="rgba(239,68,68,0.025)" fill="none" stroke-width="0.4"/>
-    <circle cx="500" cy="500" r="370" stroke="rgba(239,68,68,0.016)" fill="none" stroke-width="0.3" stroke-dasharray="14 35"/>
-    <circle cx="500" cy="500" r="160" stroke="rgba(107,163,247,0.018)" fill="none" stroke-width="0.3"/>
-    <line x1="40" y1="960" x2="960" y2="40" stroke="rgba(239,68,68,0.018)" stroke-width="0.3"/>
-    <line x1="120" y1="0" x2="780" y2="1000" stroke="rgba(239,68,68,0.01)" stroke-width="0.25"/>
+    <circle cx="500" cy="500" r="260" stroke="rgba(107,163,247,0.025)" fill="none" stroke-width="0.4"/>
+    <circle cx="500" cy="500" r="370" stroke="rgba(107,163,247,0.016)" fill="none" stroke-width="0.3" stroke-dasharray="14 35"/>
+    <circle cx="500" cy="500" r="160" stroke="rgba(107,163,247,0.02)" fill="none" stroke-width="0.3"/>
+    <line x1="40" y1="960" x2="960" y2="40" stroke="rgba(107,163,247,0.018)" stroke-width="0.3"/>
+    <line x1="120" y1="0" x2="780" y2="1000" stroke="rgba(107,163,247,0.01)" stroke-width="0.25"/>
   </svg>
 
   <nav class="topnav">
@@ -303,7 +303,7 @@
   <div class="core">
     <img class="icon" src="./icon.png" alt="Muesli" width="72" height="72">
     <h1 class="name">muesli</h1>
-    <p class="sub">free speech &middot; on device &middot; local inference</p>
+    <p class="sub">free speech to text &middot; on-device local inference &middot; auto meeting transcriptions</p>
     <a class="get" href="https://github.com/pHequals7/muesli/releases/latest/download/Muesli.dmg">download for macOS</a>
   </div>
 
@@ -378,7 +378,7 @@ class Particle {
 
   wake() { this.on = true; }
 
-  tick(mx, my, ptr) {
+  tick(mx, my, ptr, others) {
     if (!this.on) return;
 
     // slowly evolving drift direction — smooth meandering paths
@@ -386,6 +386,18 @@ class Particle {
 
     this.x += Math.cos(this.angle) * this.speed;
     this.y += Math.sin(this.angle) * this.speed;
+
+    // soft repulsion — quotes push apart when too close
+    for (const o of others) {
+      if (o === this || !o.on) continue;
+      const dx = this.x - o.x, dy = this.y - o.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < 140 && d > 0) {
+        const push = (1 - d / 140) * 0.15;
+        this.x += (dx / d) * push;
+        this.y += (dy / d) * push;
+      }
+    }
 
     // wrap around edges — infinite drifting field
     const W = innerWidth, H = innerHeight, pad = 60;
@@ -428,17 +440,24 @@ function init() {
   const shuffled = [...QUOTES].sort(() => Math.random() - 0.5);
   const count = W < 520 ? 12 : W < 820 ? 17 : shuffled.length;
 
+  const placed = []; // track placed positions for spacing
+
   for (let i = 0; i < count; i++) {
     const q = shuffled[i];
     const tier = TIERS[Math.floor(Math.random() * TIERS.length)];
 
-    // place avoiding center
+    // place avoiding center AND other quotes
+    const minDist = 160;
     let x, y, att = 0;
     do {
-      x = Math.random() * (W - 160) + 50;
-      y = Math.random() * (H - 120) + 40;
+      x = Math.random() * (W - 200) + 60;
+      y = Math.random() * (H - 140) + 50;
       att++;
-    } while (att < 80 && Math.hypot(x - cx, y - cy) < excl);
+    } while (att < 200 && (
+      Math.hypot(x - cx, y - cy) < excl ||
+      placed.some(p => Math.hypot(x - p.x, y - p.y) < minDist)
+    ));
+    placed.push({ x, y });
 
     const el = document.createElement('div');
     el.className = 'q' + (q.rev ? ' rev' : '');
@@ -478,7 +497,7 @@ document.addEventListener('touchend', () => { ptr = false; });
 
 // ── animation loop ──────────────────────────────────────────
 function loop() {
-  for (const p of particles) p.tick(mx, my, ptr);
+  for (const p of particles) p.tick(mx, my, ptr, particles);
   requestAnimationFrame(loop);
 }
 
