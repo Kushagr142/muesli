@@ -59,7 +59,7 @@ struct BackendOption: Equatable {
         model: "FluidInference/nemotron-speech-streaming-en-0.6b-coreml",
         label: "Nemotron Streaming (Experimental)",
         sizeLabel: "~600 MB",
-        description: "Experimental. NVIDIA streaming RNNT. English-only. Handsfree mode only. Spacing may be inconsistent between chunks.",
+        description: "Experimental. NVIDIA streaming RNNT. English-only. Handsfree mode only. No punctuation (RNNT limitation). Append-only — no corrections.",
         recommended: false
     )
 

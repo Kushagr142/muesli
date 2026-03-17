@@ -110,14 +110,9 @@ cat > "$STAGED_APP_DIR/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Confirm before overwriting existing app
+# Replace existing app (no prompt — that's what this script is for)
 if [[ -d "$APP_DIR" ]]; then
-  echo "Warning: $APP_DIR already exists and will be replaced."
-  read -p "Continue? [y/N] " confirm
-  if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-    echo "Aborted. Staged app at: $STAGED_APP_DIR"
-    exit 0
-  fi
+  echo "Replacing $APP_DIR"
 fi
 
 mkdir -p "$INSTALL_DIR"

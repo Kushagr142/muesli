@@ -88,6 +88,12 @@ actor TranscriptionCoordinator {
             if #available(macOS 15, *) {
                 do {
                     try await nemotronTranscriber.loadModels(progress: progress)
+                    // Warmup ANE so first dictation starts instantly
+                    fputs("[muesli-native] Nemotron warmup: running silent chunk for ANE compilation...\n", stderr)
+                    var state = try await nemotronTranscriber.makeStreamState()
+                    let silence = [Float](repeating: 0, count: 8960)
+                    _ = try? await nemotronTranscriber.transcribeChunk(samples: silence, state: &state)
+                    fputs("[muesli-native] Nemotron warmup complete\n", stderr)
                 } catch {
                     fputs("[muesli-native] Nemotron preload failed: \(error)\n", stderr)
                 }

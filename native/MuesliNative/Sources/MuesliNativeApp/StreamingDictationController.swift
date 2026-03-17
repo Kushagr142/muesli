@@ -32,6 +32,21 @@ final class StreamingDictationController {
         self.transcriber = transcriber
     }
 
+    /// Pre-warm the ANE so first real chunk is fast. Call this early (e.g., on backend select).
+    func warmup() {
+        Task {
+            do {
+                var state = try await transcriber.makeStreamState()
+                fputs("[streaming-dictation] warming up ANE...\n", stderr)
+                let silence = [Float](repeating: 0, count: chunkSamples)
+                _ = try? await transcriber.transcribeChunk(samples: silence, state: &state)
+                fputs("[streaming-dictation] warmup done\n", stderr)
+            } catch {
+                fputs("[streaming-dictation] warmup failed: \(error)\n", stderr)
+            }
+        }
+    }
+
     func start() {
         guard !isActive else { return }
         isActive = true
@@ -39,36 +54,28 @@ final class StreamingDictationController {
         sampleBuffer.removeAll()
         chunkQueue.removeAll()
 
+        // Start mic IMMEDIATELY — don't block on state init or warmup
+        recorder.onAudioBuffer = { [weak self] samples in
+            self?.handleAudioBuffer(samples)
+        }
+        do {
+            try recorder.prepare()
+            try recorder.start()
+            fputs("[streaming-dictation] mic started\n", stderr)
+        } catch {
+            fputs("[streaming-dictation] mic start failed: \(error)\n", stderr)
+            return
+        }
+
+        // Init stream state in background — audio buffers queue while this runs
         Task {
-            // Initialize streaming state
             do {
                 streamState = try await transcriber.makeStreamState()
-                fputs("[streaming-dictation] stream state created\n", stderr)
+                fputs("[streaming-dictation] stream state ready, draining queued chunks\n", stderr)
+                // Process any chunks that accumulated during init
+                await drainQueue()
             } catch {
                 fputs("[streaming-dictation] failed to create stream state: \(error)\n", stderr)
-                return
-            }
-
-            // Warmup: run a silent chunk to trigger ANE compilation
-            if var state = streamState {
-                fputs("[streaming-dictation] warming up ANE...\n", stderr)
-                let silence = [Float](repeating: 0, count: chunkSamples)
-                _ = try? await transcriber.transcribeChunk(samples: silence, state: &state)
-                streamState = state
-                fputs("[streaming-dictation] warmup done\n", stderr)
-            }
-
-            // Start mic recording — onAudioBuffer fires on AVAudioEngine's thread
-            recorder.onAudioBuffer = { [weak self] samples in
-                self?.handleAudioBuffer(samples)
-            }
-
-            do {
-                try recorder.prepare()
-                try recorder.start()
-                fputs("[streaming-dictation] mic started\n", stderr)
-            } catch {
-                fputs("[streaming-dictation] mic start failed: \(error)\n", stderr)
             }
         }
     }
