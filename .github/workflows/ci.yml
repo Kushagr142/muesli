@@ -12,32 +12,42 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      native: ${{ steps.check.outputs.native }}
+      native_or_packaging: ${{ steps.check.outputs.native_or_packaging }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
-      - name: Check for native changes
+      - name: Check for native or packaging changes
         id: check
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            FILES=$(git diff --name-only HEAD^1 HEAD -- 'native/' '.github/workflows/ci.yml')
+            FILES=$(git diff --name-only HEAD^1 HEAD -- \
+              'native/' \
+              'assets/' \
+              'scripts/build_native_app.sh' \
+              'scripts/test_packaged_cli.sh' \
+              '.github/workflows/ci.yml')
           else
-            FILES=$(git diff --name-only HEAD~1 HEAD -- 'native/' '.github/workflows/ci.yml')
+            FILES=$(git diff --name-only HEAD~1 HEAD -- \
+              'native/' \
+              'assets/' \
+              'scripts/build_native_app.sh' \
+              'scripts/test_packaged_cli.sh' \
+              '.github/workflows/ci.yml')
           fi
           if [ -n "$FILES" ]; then
-            echo "native=true" >> "$GITHUB_OUTPUT"
-            echo "Native files changed:"
+            echo "native_or_packaging=true" >> "$GITHUB_OUTPUT"
+            echo "Native or packaging files changed:"
             echo "$FILES"
           else
-            echo "native=false" >> "$GITHUB_OUTPUT"
-            echo "No native files changed — skipping build"
+            echo "native_or_packaging=false" >> "$GITHUB_OUTPUT"
+            echo "No native or packaging files changed — skipping build"
           fi
 
   # Swift build + tests — only when native code changes
   build-and-test:
     needs: changes
-    if: needs.changes.outputs.native == 'true'
+    if: needs.changes.outputs.native_or_packaging == 'true'
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -50,18 +60,32 @@ jobs:
       - name: Run tests
         run: swift test --package-path native/MuesliNative
 
+  # Packaged CLI smoke test — verify the app bundle contains muesli-cli
+  packaged-cli-smoke:
+    needs: changes
+    if: needs.changes.outputs.native_or_packaging == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify packaged CLI bundle
+        run: ./scripts/test_packaged_cli.sh
+
   # Gate job — always runs, always reports a status
   # This is the only required check in branch protection
   ci-gate:
     if: always()
-    needs: [changes, build-and-test]
+    needs: [changes, build-and-test, packaged-cli-smoke]
     runs-on: ubuntu-latest
     steps:
       - name: Check result
         run: |
-          if [[ "${{ needs.build-and-test.result }}" =~ ^(success|skipped)$ ]]; then
-            echo "CI passed (build-and-test: ${{ needs.build-and-test.result }})"
+          if [[ "${{ needs.build-and-test.result }}" =~ ^(success|skipped)$ ]] && \
+             [[ "${{ needs.packaged-cli-smoke.result }}" =~ ^(success|skipped)$ ]]; then
+            echo "CI passed (build-and-test: ${{ needs.build-and-test.result }}, packaged-cli-smoke: ${{ needs.packaged-cli-smoke.result }})"
           else
-            echo "CI failed (build-and-test: ${{ needs.build-and-test.result }})"
+            echo "CI failed (build-and-test: ${{ needs.build-and-test.result }}, packaged-cli-smoke: ${{ needs.packaged-cli-smoke.result }})"
             exit 1
           fi
