@@ -70,8 +70,6 @@ cd muesli
 ./scripts/build_native_app.sh
 ```
 
-The transcription model (~250MB for Parakeet v3) downloads automatically on first use.
-
 ---
 
 ## Agent CLI
