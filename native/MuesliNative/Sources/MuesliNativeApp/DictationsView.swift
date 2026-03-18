@@ -20,6 +20,8 @@ struct DictationsView: View {
     let appState: AppState
     let controller: MuesliController
     @State private var selectedFilter: DictationFilter = .all
+    @State private var dictationToDelete: DictationRecord?
+    @State private var showDeleteConfirmation = false
 
     private var groupedDictations: [(header: String, records: [DictationRecord])] {
         let calendar = Calendar.current
@@ -114,6 +116,9 @@ struct DictationsView: View {
                                             timeOnly: formatTimeOnly(record.timestamp)
                                         ) {
                                             controller.copyToClipboard(record.rawText)
+                                        } onDelete: {
+                                            dictationToDelete = record
+                                            showDeleteConfirmation = true
                                         }
                                     }
                                 }
@@ -138,6 +143,22 @@ struct DictationsView: View {
                     .padding(.bottom, MuesliTheme.spacing24)
                 }
             }
+        }
+        .alert(
+            "Delete this dictation?",
+            isPresented: $showDeleteConfirmation
+        ) {
+            Button("Cancel", role: .cancel) {
+                dictationToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                if let dictation = dictationToDelete {
+                    controller.deleteDictation(id: dictation.id)
+                }
+                dictationToDelete = nil
+            }
+        } message: {
+            Text(deleteConfirmationMessage)
         }
     }
 
@@ -265,6 +286,25 @@ struct DictationsView: View {
             return clean.count > 5 ? String(clean.suffix(8).prefix(5)) : clean
         }
         return Self.timeFormatter.string(from: date)
+    }
+
+    private var deleteConfirmationMessage: String {
+        guard let dictationToDelete else {
+            return "This speech-to-text record will be permanently deleted."
+        }
+
+        let preview = dictationToDelete.rawText
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        let truncatedPreview: String
+        if preview.count > 90 {
+            truncatedPreview = String(preview.prefix(87)) + "..."
+        } else {
+            truncatedPreview = preview
+        }
+        return truncatedPreview.isEmpty
+            ? "This speech-to-text record will be permanently deleted."
+            : "\"\(truncatedPreview)\" will be permanently deleted."
     }
 }
 

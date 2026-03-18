@@ -361,6 +361,21 @@ public final class DictationStore {
         try exec("DELETE FROM dictations", db: db)
     }
 
+    public func deleteDictation(id: Int64) throws {
+        let db = try openDatabase()
+        defer { sqlite3_close(db) }
+        let sql = "DELETE FROM dictations WHERE id = ?"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw lastError(db)
+        }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int64(statement, 1, id)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw lastError(db)
+        }
+    }
+
     public func clearMeetings() throws {
         let db = try openDatabase()
         defer { sqlite3_close(db) }

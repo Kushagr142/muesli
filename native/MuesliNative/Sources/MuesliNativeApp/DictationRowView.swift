@@ -5,6 +5,7 @@ struct DictationRowView: View {
     let record: DictationRecord
     let timeOnly: String
     let onCopy: () -> Void
+    let onDelete: () -> Void
 
     @State private var isHovered = false
 
@@ -23,12 +24,23 @@ struct DictationRowView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button(action: onCopy) {
-                Image(systemName: "doc.on.doc")
-                    .font(.system(size: 12))
-                    .foregroundStyle(MuesliTheme.textTertiary)
+            HStack(spacing: MuesliTheme.spacing8) {
+                Button(action: onCopy) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12))
+                        .foregroundStyle(MuesliTheme.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Copy dictation")
+
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12))
+                        .foregroundStyle(MuesliTheme.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Delete dictation")
             }
-            .buttonStyle(.plain)
             .opacity(isHovered ? 1 : 0)
         }
         .padding(.horizontal, MuesliTheme.spacing20)
@@ -40,5 +52,13 @@ struct DictationRowView: View {
             }
         }
         .onTapGesture(perform: onCopy)
+        .contextMenu {
+            Button("Copy") {
+                onCopy()
+            }
+            Button("Delete", role: .destructive) {
+                onDelete()
+            }
+        }
     }
 }

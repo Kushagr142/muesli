@@ -246,6 +246,24 @@ struct DictationStoreTests {
         #expect(try store.recentDictations(limit: 100).isEmpty)
     }
 
+    @Test("delete dictation removes only the selected record")
+    func deleteSingleDictation() throws {
+        let store = try makeStore()
+        let now = Date()
+
+        try store.insertDictation(text: "keep me", durationSeconds: 1.0, startedAt: now, endedAt: now)
+        try store.insertDictation(text: "delete me", durationSeconds: 1.0, startedAt: now, endedAt: now.addingTimeInterval(1))
+
+        let rows = try store.recentDictations(limit: 10)
+        let recordToDelete = try #require(rows.first(where: { $0.rawText == "delete me" }))
+
+        try store.deleteDictation(id: recordToDelete.id)
+
+        let remaining = try store.recentDictations(limit: 10)
+        #expect(remaining.count == 1)
+        #expect(remaining.first?.rawText == "keep me")
+    }
+
     @Test("clear meetings removes all records")
     func clearMeetings() throws {
         let store = try makeStore()
